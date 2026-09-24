@@ -65,3 +65,32 @@ Use:
 The screenshots prove that these fields exist in the Affiliate app UI, but they do not prove the existence of a public bulk API or Data Feed.
 
 Before any automated ingestion is implemented, inspect the exact copied affiliate URL and determine whether the public product page exposes stable product identifiers/metadata through an officially permitted source.
+
+
+## Verified affiliate-link pattern
+
+A real Affiliate "Salin link" URL from the owner's account:
+
+`https://s.blibli.com/GNtk/dwtoylcx`
+
+Observed structure:
+
+- host: `s.blibli.com`
+- route/template segment: `GNtk`
+- shortlink token: `dwtoylcx`
+
+The short URL itself does **not** expose a Blibli product ID or SKU. Public examples show the same `/GNtk/<token>` pattern being used for Blibli product links, and some publishers also expose the equivalent `blibli.onelink.me/GNtk/<token>` form.
+
+### Engineering consequence
+
+Do not attempt to parse a product ID from the shortlink token.
+
+Instead:
+
+1. Resolve the shortlink through an officially permitted HTTP redirect flow.
+2. Capture the final public Blibli product URL.
+3. Extract the stable product identifier from the final URL when present (for example a `ps--...` identifier).
+4. Join that canonical product ID to the Affiliate short URL.
+5. Preserve the original Affiliate short URL for outbound clicks/attribution.
+
+If automated redirect resolution is restricted, provide a manual "Resolve URL" import step where the owner pastes the final browser URL alongside the Affiliate shortlink.
