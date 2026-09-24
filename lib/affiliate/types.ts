@@ -3,6 +3,7 @@ export type AffiliateSource = "blibli" | "manual";
 export type RawAffiliateProduct = {
   source: AffiliateSource;
   externalId: string;
+  canonicalProductId?: string;
   name: string;
   brand?: string;
   category?: string;
@@ -14,6 +15,8 @@ export type RawAffiliateProduct = {
   imageUrl?: string;
   productUrl: string;
   affiliateUrl?: string;
+  pickupPointCode?: string;
+  affiliateTrackingId?: string;
 
   // Blibli marketplace signals visible in the Affiliate catalog UI.
   rating?: number;
