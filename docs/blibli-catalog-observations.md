@@ -94,3 +94,26 @@ Instead:
 5. Preserve the original Affiliate short URL for outbound clicks/attribution.
 
 If automated redirect resolution is restricted, provide a manual "Resolve URL" import step where the owner pastes the final browser URL alongside the Affiliate shortlink.
+
+
+## Verified final product URL structure
+
+A real Affiliate shortlink resolved to:
+
+`https://www.blibli.com/p/silicone-strap-tali-jam-silikon-rubber-for-xiaomi-redmi-smart-band-2-mi-band-8-active-silicon-karet-smartband/is--HOM-70013-01243-00006?pickupPointCode=PP-3177877&share_link=1&utm_campaign=affiliate_share&utm_content=salin_link&utm_medium=aff_6ab567e244d6d2a8c322863d&utm_source=affiliates`
+
+Parsed fields:
+
+- canonical product ID: `HOM-70013-01243-00006`
+- product slug: `silicone-strap-tali-jam-silikon-rubber-for-xiaomi-redmi-smart-band-2-mi-band-8-active-silicon-karet-smartband`
+- pickup point code: `PP-3177877`
+- affiliate medium / tracking value: `aff_6ab567e244d6d2a8c322863d`
+- campaign: `affiliate_share`
+- content: `salin_link`
+- source: `affiliates`
+
+Canonical URL for deduplication should omit query parameters:
+
+`https://www.blibli.com/p/silicone-strap-tali-jam-silikon-rubber-for-xiaomi-redmi-smart-band-2-mi-band-8-active-silicon-karet-smartband/is--HOM-70013-01243-00006`
+
+The original affiliate URL must still be preserved for outbound clicks so attribution parameters are not lost.
