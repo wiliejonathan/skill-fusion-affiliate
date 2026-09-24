@@ -1,4 +1,4 @@
-export type AffiliateSource = "involve-asia" | "manual";
+export type AffiliateSource = "blibli" | "manual";
 
 export type RawAffiliateProduct = {
   source: AffiliateSource;
@@ -6,6 +6,7 @@ export type RawAffiliateProduct = {
   name: string;
   brand?: string;
   category?: string;
+  subcategory?: string;
   description?: string;
   price?: number;
   originalPrice?: number;
@@ -13,9 +14,14 @@ export type RawAffiliateProduct = {
   imageUrl?: string;
   productUrl: string;
   affiliateUrl?: string;
+
+  // Blibli marketplace signals visible in the Affiliate catalog UI.
   rating?: number;
   reviewCount?: number;
-  commissionRate?: number;
+  soldCount?: number;
+  rank30d?: number;
+  commissionMaxIdr?: number;
+
   fetchedAt: string;
 };
 
