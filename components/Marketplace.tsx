@@ -36,7 +36,7 @@ export default function Marketplace(){
       const searchable=[p.name,p.brand,p.category,...p.features].join(" ").toLowerCase();
       return (!q||searchable.includes(q))&&(category==="Semua"||p.category===category);
     });
-  },[query,category]);
+  },[query,category,products]);
 
   function toggleWishlist(id:string){
     setWishlist(toggleWishlistId(id));
