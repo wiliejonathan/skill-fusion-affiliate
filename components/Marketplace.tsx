@@ -40,10 +40,6 @@ export default function Marketplace(){
     setWishlist(toggleWishlistId(id));
   }
 
-  function scrollProducts(){
-    document.getElementById("catalog")?.scrollIntoView({behavior:"smooth",block:"start"});
-  }
-
   const filters=<div className="filters-inner tech-filter">
     <div className="filter-head">
       <div><span className="eyebrow">FILTER MATRIX</span><h2>Product Class</h2></div>
@@ -95,10 +91,6 @@ export default function Marketplace(){
           <div className="hero-kicker"><span className="bracket">[</span> CURATED TECHNOLOGY INTELLIGENCE <span className="bracket">]</span></div>
           <h1><span>SMART TECH.</span><br/><strong>BETTER SIGNAL.</strong></h1>
           <p>Skill Fusion menyaring gadget dan teknologi yang layak dipertimbangkan—dengan katalog ringkas, foto produk lengkap, dan jalur langsung ke penawaran affiliate.</p>
-          <div className="hero-actions">
-            <button className="mech-button primary" onClick={scrollProducts}><span>EXPLORE CATALOG</span><ArrowRight size={17}/></button>
-            <a className="mech-button ghost" href={IG_BRAND} target="_blank" rel="noreferrer"><AtSign size={17}/><span>FOLLOW BRAND</span></a>
-          </div>
           <div className="identity-strip">
             <div><small>OWNER</small><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a></div>
             <div><small>BRAND CHANNEL</small><a href={IG_BRAND} target="_blank" rel="noreferrer">@skill.fusion.id</a></div>
