@@ -1,6 +1,6 @@
 "use client";
 
-import {useMemo,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
 import {CheckCircle2,CopyCheck,ExternalLink,LayoutDashboard,Link2,PackageSearch,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
 import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
@@ -21,6 +21,9 @@ const initialCatalog:CatalogIdentity[]=[{
   canonicalUrl:FIRST_CANONICAL
 }];
 
+const STORAGE_CATALOG_KEY="skill-fusion:admin:catalog:v1";
+const STORAGE_RESOLVED_KEY="skill-fusion:admin:resolved:v1";
+
 const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
     inputUrl:FIRST_LINK,finalUrl:FIRST_FINAL,canonicalUrl:FIRST_CANONICAL,
@@ -35,6 +38,34 @@ export default function AdminPage(){
   const [resolved,setResolved]=useState<Record<string,ResolvedProduct>>(initialResolved);
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState("");
+  const [hydrated,setHydrated]=useState(false);
+
+  useEffect(()=>{
+    try{
+      const savedCatalog=window.localStorage.getItem(STORAGE_CATALOG_KEY);
+      const savedResolved=window.localStorage.getItem(STORAGE_RESOLVED_KEY);
+
+      if(savedCatalog){
+        const parsed=JSON.parse(savedCatalog);
+        if(Array.isArray(parsed)) setCatalog(parsed);
+      }
+
+      if(savedResolved){
+        const parsed=JSON.parse(savedResolved);
+        if(parsed && typeof parsed==="object" && !Array.isArray(parsed)) setResolved(parsed);
+      }
+    }catch{
+      setNotice("Data lokal sebelumnya tidak bisa dibaca. Katalog default dipakai.");
+    }finally{
+      setHydrated(true);
+    }
+  },[]);
+
+  useEffect(()=>{
+    if(!hydrated) return;
+    window.localStorage.setItem(STORAGE_CATALOG_KEY,JSON.stringify(catalog));
+    window.localStorage.setItem(STORAGE_RESOLVED_KEY,JSON.stringify(resolved));
+  },[catalog,resolved,hydrated]);
 
   const checks=useMemo(()=>{
     const lines=[...new Set(text.split(/\r?\n|\s+(?=https?:\/\/)/).map(x=>x.trim()).filter(Boolean))];
@@ -78,13 +109,13 @@ export default function AdminPage(){
     setCatalog(prev=>[...prev,...newItems]);
     setText("");
     setBusy(false);
-    setNotice(`${newItems.length} produk baru berhasil dimasukkan. Duplicate tidak ditambahkan.`);
+    setNotice(`${newItems.length} produk baru berhasil dimasukkan dan tersimpan. Duplicate tidak ditambahkan.`);
   }
 
   function removeLink(url:string){
     setCatalog(prev=>prev.filter(x=>x.affiliateUrl!==url));
     setResolved(prev=>{const n={...prev};delete n[url];return n});
-    setNotice("Produk dihapus dari tampilan admin.");
+    setNotice("Produk dihapus dan perubahan tersimpan.");
   }
 
   return <main className="shell">
@@ -108,11 +139,11 @@ export default function AdminPage(){
         <article><span>Produk tersimpan</span><strong>{catalog.length}</strong><small>produk katalog</small></article>
         <article><span>Link baru</span><strong>{counts.READY||0}</strong><small>siap di-import</small></article>
         <article><span>Duplicate</span><strong>{counts.DUPLICATE||0}</strong><small>otomatis diblokir</small></article>
-        <article><span>Status client</span><strong>LIVE</strong><small>{catalog.length} produk aktif</small></article>
+        <article><span>Penyimpanan Admin</span><strong>{hydrated?"SAVED":"..."}</strong><small>persisten setelah reload</small></article>
       </div>
 
       <section className="panel" id="import">
-        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Paste link baru di sini. Shortlink Blibli langsung diproses otomatis; detail teknis resolver disembunyikan dari dashboard.</p></div><CopyCheck size={24}/></div>
+        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Paste link baru di sini. Produk yang berhasil di-import sekarang tersimpan otomatis dan tidak hilang saat halaman direload.</p></div><CopyCheck size={24}/></div>
         <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"Paste satu atau banyak link, satu link per baris\nhttps://s.blibli.com/GNtk/..."} />
         <div className="actions">
           <p><CheckCircle2 size={16}/> Sistem akan resolve shortlink, membaca Product ID, lalu mengecek duplicate sebelum menyimpan.</p>
