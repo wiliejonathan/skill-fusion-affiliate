@@ -3,8 +3,8 @@
 import {useEffect,useState} from "react";
 import {products as fallbackProducts,type Product} from "@/lib/products";
 
-export function useSyncedProducts(){
-  const [products,setProducts]=useState<Product[]>(fallbackProducts);
+export function useSyncedProducts(initialProducts:Product[]=fallbackProducts){
+  const [products,setProducts]=useState<Product[]>(initialProducts.length?initialProducts:fallbackProducts);
   const [lastSync,setLastSync]=useState<number|null>(null);
   const [bridgeReady,setBridgeReady]=useState(false);
 
