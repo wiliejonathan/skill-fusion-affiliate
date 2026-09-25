@@ -75,9 +75,7 @@ export const products:Product[]=[
   name:"ACMIC PDC100 power delivery pd 100CM cable usb type c to usb type c",
   brand:"ACMIC",
   category:"Charging & Cable",
-  images:[
-    "https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"
-  ],
+  images:["https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"],
   affiliateUrl:"https://s.blibli.com/GNtk/gd0wp7zz",
   badge:"Blibli Affiliate",
   features:["100 cm","USB Type-C","Power Delivery"]
