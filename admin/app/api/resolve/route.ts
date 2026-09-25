@@ -122,7 +122,7 @@ function chooseDominantGallery(images:string[]){
   return [...new Set(best)].slice(0,12);
 }
 
-async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null){
+async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null):Promise<{title:string|null;images:string[]}>{
   if(!productId) return {title:null as string|null,images:[] as string[]};
 
   try{
@@ -150,9 +150,9 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
 
     const payload=await res.json();
     const data=payload?.data||payload;
-    const images=(Array.isArray(data?.images)?data.images:[])
+    const images:string[]=(Array.isArray(data?.images)?data.images:[])
       .map((item:any)=>item?.full||item?.large||item?.medium||item?.thumbnail||null)
-      .filter((x:any):x is string=>typeof x==="string"&&/^https?:\/\//i.test(x));
+      .filter((x:unknown):x is string=>typeof x==="string"&&/^https?:\/\//i.test(x));
 
     return {
       title:typeof data?.name==="string"?data.name.trim():null,
