@@ -10,13 +10,20 @@ function pick(html:string,patterns:RegExp[]){
   return null;
 }
 
-function extractStaticImage(html:string){
-  const needle="https://www.static-src.com/wcsstore/Indraprastha/images/catalog/";
-  const start=html.indexOf(needle);
-  if(start<0) return null;
-  const tail=html.slice(start);
-  const match=tail.match(/^[^"'\s<>]+/);
-  return match?.[0]||null;
+function extractStaticImages(html:string){
+  const results:string[]=[];
+  const needle="https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/";
+  let cursor=0;
+  while(results.length<20){
+    const start=html.indexOf(needle,cursor);
+    if(start<0) break;
+    const tail=html.slice(start);
+    const match=tail.match(/^[^"'\s<>]+/);
+    const raw=match?.[0]?.replace(/&amp;/g,"&")||"";
+    if(raw && !results.includes(raw)) results.push(raw);
+    cursor=start+needle.length;
+  }
+  return results;
 }
 
 function productIdFromUrl(value:string){
@@ -90,9 +97,12 @@ export async function GET(req:NextRequest){
         title=titleFromUrl(current);
       }
 
-      const image=pick(html,[
+      const ogImage=pick(html,[
         /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
-      ])||extractStaticImage(html);
+      ]);
+      const extractedImages=extractStaticImages(html);
+      const images=[...new Set([ogImage,...extractedImages].filter((x):x is string=>Boolean(x)))];
+      const image=images[0]||null;
       const price=pick(html,[
         /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
         /"price"\s*:\s*"?(\d+(?:\.\d+)?)"?/i
@@ -105,7 +115,7 @@ export async function GET(req:NextRequest){
       return NextResponse.json({
         ok:true,inputUrl:raw,finalUrl:current,canonicalUrl:canonical,
         canonicalProductId:productIdFromUrl(canonical)||productIdFromUrl(current),
-        title,image,price,currency
+        title,image,images,price,currency
       });
     }
 
@@ -113,7 +123,7 @@ export async function GET(req:NextRequest){
     return NextResponse.json({
       ok:true,inputUrl:raw,finalUrl:current,canonicalUrl:canonical,
       canonicalProductId:productIdFromUrl(current),title:titleFromUrl(current),
-      image:null,price:null,currency:null
+      image:null,images:[],price:null,currency:null
     });
   }catch{
     return NextResponse.json({
