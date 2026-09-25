@@ -101,7 +101,9 @@ export async function GET(req:NextRequest){
         /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
       ]);
       const extractedImages=extractStaticImages(html);
-      const images=[...new Set([ogImage,...extractedImages].filter((x):x is string=>Boolean(x)))];
+      const allImages=[...new Set([ogImage,...extractedImages].filter((x):x is string=>Boolean(x)))];
+      const assetKey=(ogImage||allImages[0]||"").match(/MTA-\d+/)?.[0]||null;
+      const images=(assetKey?allImages.filter(src=>src.includes(assetKey)):allImages).slice(0,12);
       const image=images[0]||null;
       const price=pick(html,[
         /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
@@ -128,7 +130,7 @@ export async function GET(req:NextRequest){
   }catch{
     return NextResponse.json({
       ok:false,inputUrl:raw,finalUrl:current,canonicalUrl:null,canonicalProductId:null,
-      title:"Produk Blibli",image:null,price:null,currency:null,
+      title:"Produk Blibli",image:null,images:[],price:null,currency:null,
       message:"Link affiliate valid, tetapi metadata belum bisa dibaca otomatis."
     });
   }
