@@ -19,7 +19,7 @@ type DbProduct={
   category:string;
   images:string[];
   affiliateUrl:string;
-  canonicalUrl?:string|null;
+  canonicalUrl:string|null;
   badge:string;
   features:string[];
 };
@@ -74,14 +74,14 @@ function inferFeatures(title:string){
 }
 
 function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,ResolvedProduct>):DbProduct[]{
-  return catalog.map((item,index)=>{
+  return catalog.flatMap((item,index)=>{
     const affiliateUrl=item.affiliateUrl||"";
     const meta=resolved[affiliateUrl];
     const id=item.canonicalProductId||meta?.canonicalProductId||"";
-    if(!affiliateUrl||!id) return null;
+    if(!affiliateUrl||!id) return [];
     const name=(meta?.title||"Produk Blibli").trim();
     const images=meta?.images?.length?meta.images:(meta?.image?[meta.image]:[]);
-    return {
+    const product:DbProduct={
       sequence:item.sequence||index+1,
       id,
       canonicalProductId:id,
@@ -94,7 +94,8 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
       badge:"Blibli Affiliate",
       features:inferFeatures(name)
     };
-  }).filter((x):x is DbProduct=>Boolean(x));
+    return [product];
+  });
 }
 
 function dbToLocal(products:DbProduct[]){
