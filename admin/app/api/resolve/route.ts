@@ -123,7 +123,7 @@ function chooseDominantGallery(images:string[]){
 }
 
 async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null):Promise<{title:string|null;images:string[]}>{
-  if(!productId) return {title:null as string|null,images:[] as string[]};
+  if(!productId) return {title:null,images:[]};
 
   try{
     const source=new URL(sourceUrl);
@@ -134,30 +134,44 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
     );
     if(pickupPointCode) endpoint.searchParams.set("pickupPointCode",pickupPointCode);
 
-    const res=await fetch(endpoint.toString(),{
-      cache:"no-store",
-      redirect:"follow",
-      headers:{
-        "user-agent":UA,
-        "accept":"application/json,text/plain,*/*",
-        "accept-language":"id-ID,id;q=0.9,en;q=0.8",
-        "referer":canonicalProductUrl(sourceUrl),
-        "pragma":"no-cache",
-        "cache-control":"no-cache"
-      }
-    });
-    if(!res.ok) return {title:null,images:[]};
+    const userAgents=[
+      "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)",
+      UA,
+      "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    ];
 
-    const payload=await res.json();
-    const data=payload?.data||payload;
-    const images:string[]=(Array.isArray(data?.images)?data.images:[])
-      .map((item:any)=>item?.full||item?.large||item?.medium||item?.thumbnail||null)
-      .filter((x:unknown):x is string=>typeof x==="string"&&/^https?:\/\//i.test(x));
+    for(const ua of userAgents){
+      try{
+        const res=await fetch(endpoint.toString(),{
+          cache:"no-store",
+          redirect:"follow",
+          headers:{
+            "user-agent":ua,
+            "accept":"application/json,text/plain,*/*",
+            "accept-language":"id-ID,id;q=0.9,en;q=0.8",
+            "referer":canonicalProductUrl(sourceUrl),
+            "pragma":"no-cache",
+            "cache-control":"no-cache"
+          }
+        });
+        if(!res.ok) continue;
 
-    return {
-      title:typeof data?.name==="string"?data.name.trim():null,
-      images:[...new Set(images)].slice(0,20)
-    };
+        const payload=await res.json();
+        const data=payload?.data||payload;
+        const images:string[]=(Array.isArray(data?.images)?data.images:[])
+          .map((item:any)=>item?.full||item?.large||item?.medium||item?.thumbnail||null)
+          .filter((x:unknown):x is string=>typeof x==="string"&&/^https?:\/\//i.test(x));
+
+        if(images.length){
+          return {
+            title:typeof data?.name==="string"?data.name.trim():null,
+            images:[...new Set(images)].slice(0,20)
+          };
+        }
+      }catch{}
+    }
+
+    return {title:null,images:[]};
   }catch{
     return {title:null,images:[]};
   }
