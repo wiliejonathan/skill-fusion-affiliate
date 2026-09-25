@@ -71,7 +71,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
       onClick={openDetail}
       onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openDetail()}}}
     >
-      <div className="card-tech-rail"><span>SF // {String(p.sequence).padStart(2,"0")}</span><span>MEDIA {String(count).padStart(2,"0")}</span></div>
+      <div className="card-tech-rail"><span>SF // #{String(p.sequence).padStart(3,"0")}</span><span>MEDIA {String(count).padStart(2,"0")}</span></div>
       <div className="product-visual gallery-visual">
         {images[active]?<img className="product-photo" src={images[active]} alt={p.name+` foto ${active+1}`}/>:null}
         <span className="product-badge">{p.badge}</span>
@@ -110,7 +110,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
 
       <div className="product-body">
         <div className="product-meta"><span>{p.brand}</span><span>{p.category}</span></div>
-        <h3><span className="product-sequence">{String(p.sequence).padStart(2,"0")}.</span> {p.name}</h3>
+        <h3><span className="product-sequence">#{String(p.sequence).padStart(3,"0")}</span> {p.name}</h3>
         <div className="product-id-line"><ScanLine size={13}/><span>{p.canonicalProductId}</span></div>
         <div className="feature-list">{p.features.map(x=><span key={x}>{x}</span>)}</div>
         <div className="price-block"><strong>LIVE PRICE @ BLIBLI</strong><div><span className="live-note">Harga & stok mengikuti halaman merchant.</span></div></div>
