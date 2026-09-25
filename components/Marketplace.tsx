@@ -5,7 +5,8 @@ import {ArrowRight,AtSign,Cpu,Filter,Heart,Search,ShieldCheck,Sparkles,X,Zap} fr
 import Link from "next/link";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
-import {categories,products} from "@/lib/products";
+import {categories} from "@/lib/products";
+import {useSyncedProducts} from "@/lib/useSyncedProducts";
 import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
 
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
@@ -16,6 +17,7 @@ export default function Marketplace(){
   const [category,setCategory]=useState("Semua");
   const [mobileFilters,setMobileFilters]=useState(false);
   const [wishlist,setWishlist]=useState<string[]>([]);
+  const {products,lastSync}=useSyncedProducts();
 
   useEffect(()=>{
     setWishlist(readWishlist());
@@ -124,7 +126,7 @@ export default function Marketplace(){
           <aside className="filter-sidebar">{filters}</aside>
           <div className="catalog">
             <div className="catalog-toolbar">
-              <div><span className="catalog-status"><i className="pulse-dot"/> LIVE CATALOG</span></div>
+              <div><span className="catalog-status"><i className="pulse-dot"/> LIVE CATALOG{lastSync?" · SYNCED":""}</span></div>
               <button className="filter-trigger" onClick={()=>setMobileFilters(true)}><Filter size={17}/>Filter</button>
             </div>
             {filtered.length?<div className="product-grid">{filtered.map(p=><ProductCard key={p.id} product={p} wished={wishlist.includes(p.id)} onWishlist={toggleWishlist}/>)}</div>:<div className="empty-state"><span>NO SIGNAL</span><h3>Produk tidak ditemukan.</h3><p>Coba keyword lain.</p><button onClick={()=>{setQuery("");setCategory("Semua")}}>RESET MATRIX</button></div>}
