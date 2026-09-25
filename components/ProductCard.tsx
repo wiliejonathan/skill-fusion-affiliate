@@ -8,7 +8,7 @@ type Props={product:Product;wished:boolean;onWishlist:(id:string)=>void};
 export default function ProductCard({product:p,wished,onWishlist}:Props){
   return <article className="product-card">
     <div className="product-visual">
-      <span className="product-icon">{p.icon}</span>
+      <img className="product-photo" src={p.imageUrl} alt={p.name}/>
       <span className="product-badge">{p.badge}</span>
       <div className="card-actions">
         <button className={wished?"icon-btn active":"icon-btn"} onClick={()=>onWishlist(p.id)} aria-label="Wishlist">
