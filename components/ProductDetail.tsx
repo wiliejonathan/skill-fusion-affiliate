@@ -1,10 +1,11 @@
 "use client";
 
-import {useState} from "react";
+import {useEffect,useState} from "react";
 import Link from "next/link";
 import {AtSign,Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2,X,ZoomIn} from "lucide-react";
 import BrandLogo from "./BrandLogo";
 import type {Product} from "@/lib/products";
+import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
 
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
 const IG_BRAND="https://www.instagram.com/skill.fusion.id/";
@@ -16,6 +17,23 @@ export default function ProductDetail({product}:{product:Product}){
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const images=product.images||[];
   const count=images.length;
+
+  useEffect(()=>{
+    setLiked(readWishlist().includes(product.id));
+    const sync=()=>setLiked(readWishlist().includes(product.id));
+    window.addEventListener("storage",sync);
+    window.addEventListener("skillfusion:wishlist",sync as EventListener);
+    return ()=>{
+      window.removeEventListener("storage",sync);
+      window.removeEventListener("skillfusion:wishlist",sync as EventListener);
+    };
+  },[product.id]);
+
+  function toggleDetailWishlist(){
+    const next=toggleWishlistId(product.id);
+    setLiked(next.includes(product.id));
+  }
+
   const prev=()=>setActive(i=>(i-1+count)%count);
   const next=()=>setActive(i=>(i+1)%count);
 
@@ -89,10 +107,20 @@ export default function ProductDetail({product}:{product:Product}){
               <button className="detail-share" onClick={shareProduct} aria-label="Bagikan produk">
                 {shareState==="idle"?<Share2 size={18}/>:<Check size={18}/>}
               </button>
-              <button className={liked?"detail-like active":"detail-like"} onClick={()=>setLiked(v=>!v)} aria-label="Wishlist"><Heart size={18} fill={liked?"currentColor":"none"}/></button>
+              <button
+                className={liked?"detail-like wishlist-heart active":"detail-like wishlist-heart"}
+                onClick={toggleDetailWishlist}
+                aria-label={liked?"Hapus dari wishlist":"Simpan ke wishlist"}
+                aria-pressed={liked}
+              >
+                <Heart size={18} fill={liked?"currentColor":"none"}/>
+              </button>
             </div>
           </div>
-          {shareState!=="idle"?<div className="detail-share-feedback">{shareState==="shared"?"DIBAGIKAN":"LINK DISALIN"}</div>:null}
+          <div className="detail-action-feedbacks">
+            {liked?<span className="detail-wishlist-feedback">♥ TERSIMPAN DI WISHLIST</span>:null}
+            {shareState!=="idle"?<span className="detail-share-feedback">{shareState==="shared"?"DIBAGIKAN":"LINK DISALIN"}</span>:null}
+          </div>
           <div className="detail-meta">{product.brand} // {product.category}</div>
           <h1>{product.name}</h1>
           <div className="detail-product-id"><ScanLine size={14}/> PRODUCT ID // {product.canonicalProductId}</div>
