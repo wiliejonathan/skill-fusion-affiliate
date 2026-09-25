@@ -5,11 +5,12 @@ import Link from "next/link";
 import {ArrowLeft,Heart,Trash2} from "lucide-react";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
-import {products} from "@/lib/products";
+import {useSyncedProducts} from "@/lib/useSyncedProducts";
 import {readWishlist,toggleWishlistId,writeWishlist} from "@/lib/wishlist";
 
 export default function WishlistView(){
   const [wishlist,setWishlist]=useState<string[]>([]);
+  const {products}=useSyncedProducts();
 
   useEffect(()=>{
     setWishlist(readWishlist());
@@ -24,7 +25,7 @@ export default function WishlistView(){
 
   const savedProducts=useMemo(
     ()=>products.filter(product=>wishlist.includes(product.id)),
-    [wishlist]
+    [wishlist,products]
   );
 
   function toggle(id:string){
