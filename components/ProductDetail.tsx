@@ -2,7 +2,7 @@
 
 import {useState} from "react";
 import Link from "next/link";
-import {ChevronLeft,ChevronRight,ExternalLink,Heart,Instagram,ScanLine,X,ZoomIn} from "lucide-react";
+import {AtSign,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,X,ZoomIn} from "lucide-react";
 import BrandLogo from "./BrandLogo";
 import type {Product} from "@/lib/products";
 
@@ -84,7 +84,7 @@ export default function ProductDetail({product}:{product:Product}){
         <BrandLogo compact/>
         <div><small>OWNER</small><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a></div>
         <div><small>BRAND</small><a href={IG_BRAND} target="_blank" rel="noreferrer">@skill.fusion.id</a></div>
-        <a className="detail-instagram" href={IG_BRAND} target="_blank" rel="noreferrer"><Instagram size={17}/> FOLLOW</a>
+        <a className="detail-instagram" href={IG_BRAND} target="_blank" rel="noreferrer"><AtSign size={17}/> FOLLOW</a>
       </section>
     </main>
 
