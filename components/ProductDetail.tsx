@@ -2,7 +2,7 @@
 
 import {useState} from "react";
 import Link from "next/link";
-import {AtSign,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,X,ZoomIn} from "lucide-react";
+import {AtSign,Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2,X,ZoomIn} from "lucide-react";
 import BrandLogo from "./BrandLogo";
 import type {Product} from "@/lib/products";
 
@@ -13,10 +13,44 @@ export default function ProductDetail({product}:{product:Product}){
   const [active,setActive]=useState(0);
   const [liked,setLiked]=useState(false);
   const [lightbox,setLightbox]=useState(false);
+  const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const images=product.images||[];
   const count=images.length;
   const prev=()=>setActive(i=>(i-1+count)%count);
   const next=()=>setActive(i=>(i+1)%count);
+
+  async function shareProduct(){
+    const url=window.location.href;
+    const data={title:product.name,text:`Lihat ${product.name} di Skill Fusion`,url};
+
+    try{
+      if(navigator.share){
+        await navigator.share(data);
+        setShareState("shared");
+      }else{
+        await navigator.clipboard.writeText(url);
+        setShareState("copied");
+      }
+    }catch(err){
+      if(err instanceof DOMException && err.name==="AbortError") return;
+      try{
+        await navigator.clipboard.writeText(url);
+        setShareState("copied");
+      }catch{
+        const temp=document.createElement("textarea");
+        temp.value=url;
+        temp.style.position="fixed";
+        temp.style.opacity="0";
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand("copy");
+        temp.remove();
+        setShareState("copied");
+      }
+    }
+
+    window.setTimeout(()=>setShareState("idle"),1800);
+  }
 
   return <div className="tech-site detail-shell">
     <div className="top-rail"><div className="top-rail-inner"><span><i className="pulse-dot"/> PRODUCT INTELLIGENCE</span><span className="rail-divider"/><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a><span className="rail-divider"/><a href={IG_BRAND} target="_blank" rel="noreferrer">@skill.fusion.id</a></div></div>
@@ -51,8 +85,14 @@ export default function ProductDetail({product}:{product:Product}){
           <div className="detail-panel-label"><span>PRODUCT CORE</span><strong>ACTIVE</strong></div>
           <div className="detail-topline">
             <span className="detail-badge">{product.badge}</span>
-            <button className={liked?"detail-like active":"detail-like"} onClick={()=>setLiked(v=>!v)} aria-label="Wishlist"><Heart size={18} fill={liked?"currentColor":"none"}/></button>
+            <div className="detail-actions">
+              <button className="detail-share" onClick={shareProduct} aria-label="Bagikan produk">
+                {shareState==="idle"?<Share2 size={18}/>:<Check size={18}/>}
+              </button>
+              <button className={liked?"detail-like active":"detail-like"} onClick={()=>setLiked(v=>!v)} aria-label="Wishlist"><Heart size={18} fill={liked?"currentColor":"none"}/></button>
+            </div>
           </div>
+          {shareState!=="idle"?<div className="detail-share-feedback">{shareState==="shared"?"DIBAGIKAN":"LINK DISALIN"}</div>:null}
           <div className="detail-meta">{product.brand} // {product.category}</div>
           <h1>{product.name}</h1>
           <div className="detail-product-id"><ScanLine size={14}/> PRODUCT ID // {product.canonicalProductId}</div>
