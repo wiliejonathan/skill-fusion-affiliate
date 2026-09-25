@@ -10,6 +10,10 @@ function pick(html:string,patterns:RegExp[]){
   return null;
 }
 
+const OFFICIAL_FALLBACK_PAGES:Record<string,string>={
+  "ACO-60021-00122-00005":"https://acmic.id/products/acmic-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable"
+};
+
 const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
   "XIO-60022-01141-00001":[
     "https://4phones.eu/cdn/shop/files/90000810874_A.jpg?v=1770447730",
@@ -42,6 +46,42 @@ function extractStaticImages(html:string){
   const normalized=normalizeHtmlForImages(html);
   const matches=normalized.match(/https:\/\/www\.static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/gi)||[];
   return [...new Set(matches)].slice(0,40);
+}
+
+function extractOfficialShopImages(html:string){
+  const normalized=normalizeHtmlForImages(html);
+  const matches=[
+    ...(normalized.match(/https:\/\/acmic\.id\/cdn\/shop\/files\/[^"'\\\s<>]+/gi)||[]),
+    ...(normalized.match(/https:\/\/cdn\.shopify\.com\/s\/files\/[^"'\\\s<>]+/gi)||[])
+  ];
+  return [...new Set(matches)]
+    .map(src=>src.replace(/\\u0026/gi,"&"))
+    .filter(src=>!/[?&](?:width|height)=\d{1,3}(?:&|$)/i.test(src))
+    .slice(0,12);
+}
+
+async function fetchOfficialFallbackImages(productId:string|null){
+  if(!productId) return [] as string[];
+  const page=OFFICIAL_FALLBACK_PAGES[productId];
+  if(!page) return [] as string[];
+  try{
+    const res=await fetch(page,{
+      redirect:"follow",
+      cache:"no-store",
+      headers:{
+        "user-agent":UA,
+        "accept":"text/html,application/xhtml+xml",
+        "accept-language":"id-ID,id;q=0.9,en;q=0.8"
+      }
+    });
+    if(!res.ok) return [];
+    const html=await res.text();
+    const og=pick(html,[/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i]);
+    const all=[og,...extractOfficialShopImages(html)].filter((x):x is string=>Boolean(x));
+    return [...new Set(all)].slice(0,12);
+  }catch{
+    return [];
+  }
 }
 
 function productBaseId(productId:string|null){
@@ -180,6 +220,9 @@ export async function GET(req:NextRequest){
       }
       if(!images.length){
         images=await fetchSeoListingImages(current,productId,title);
+      }
+      if(!images.length){
+        images=await fetchOfficialFallbackImages(productId);
       }
       const image=images[0]||null;
       const price=pick(html,[
