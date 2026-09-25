@@ -1,7 +1,7 @@
 "use client";
 
 import {useMemo,useState} from "react";
-import {ArrowRight,Cpu,Filter,Instagram,Search,ShieldCheck,Sparkles,X,Zap} from "lucide-react";
+import {ArrowRight,AtSign,Cpu,Filter,Search,ShieldCheck,Sparkles,X,Zap} from "lucide-react";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
 import {categories,products} from "@/lib/products";
@@ -65,7 +65,7 @@ export default function Marketplace(){
         <a className="brand" href="#" aria-label="Skill Fusion Home"><BrandLogo/></a>
         <div className="desktop-search tech-search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search curated tech..."/></div>
         <div className="header-actions">
-          <a className="header-ig" href={IG_BRAND} target="_blank" rel="noreferrer"><Instagram size={17}/><span>@skill.fusion.id</span></a>
+          <a className="header-ig" href={IG_BRAND} target="_blank" rel="noreferrer"><AtSign size={17}/><span>@skill.fusion.id</span></a>
           <span className="wishlist-chip">WISHLIST {String(wishlist.length).padStart(2,"0")}</span>
         </div>
       </div>
@@ -81,7 +81,7 @@ export default function Marketplace(){
           <p>Skill Fusion menyaring gadget dan teknologi yang layak dipertimbangkan—dengan katalog ringkas, foto produk lengkap, dan jalur langsung ke penawaran affiliate.</p>
           <div className="hero-actions">
             <button className="mech-button primary" onClick={scrollProducts}><span>EXPLORE CATALOG</span><ArrowRight size={17}/></button>
-            <a className="mech-button ghost" href={IG_BRAND} target="_blank" rel="noreferrer"><Instagram size={17}/><span>FOLLOW BRAND</span></a>
+            <a className="mech-button ghost" href={IG_BRAND} target="_blank" rel="noreferrer"><AtSign size={17}/><span>FOLLOW BRAND</span></a>
           </div>
           <div className="identity-strip">
             <div><small>OWNER</small><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a></div>
