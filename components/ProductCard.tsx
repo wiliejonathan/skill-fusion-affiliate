@@ -12,6 +12,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   const [active,setActive]=useState(0);
   const [navigating,setNavigating]=useState(false);
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
+  const [wishlistFeedback,setWishlistFeedback]=useState<"idle"|"saved"|"removed">("idle");
   const images=p.images||[];
   const count=images.length;
   const detailUrl=`/product/${encodeURIComponent(p.id)}`;
@@ -78,9 +79,23 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
           <button className="icon-btn share-icon-btn" onClick={shareProduct} aria-label="Bagikan produk">
             {shareState==="idle"?<Share2 size={17}/>:<Check size={17}/>}
           </button>
-          <button className={wished?"icon-btn active":"icon-btn"} onClick={e=>{stop(e);onWishlist(p.id)}} aria-label="Wishlist"><Heart size={17} fill={wished?"currentColor":"none"}/></button>
+          <button
+            className={wished?"icon-btn wishlist-heart active":"icon-btn wishlist-heart"}
+            onClick={e=>{
+              stop(e);
+              const nextSaved=!wished;
+              onWishlist(p.id);
+              setWishlistFeedback(nextSaved?"saved":"removed");
+              window.setTimeout(()=>setWishlistFeedback("idle"),1500);
+            }}
+            aria-label={wished?"Hapus dari wishlist":"Simpan ke wishlist"}
+            aria-pressed={wished}
+          >
+            <Heart size={17} fill={wished?"currentColor":"none"}/>
+          </button>
         </div>
         {shareState!=="idle"?<span className="share-feedback">{shareState==="shared"?"SHARED":"LINK COPIED"}</span>:null}
+        {wishlistFeedback!=="idle"?<span className="wishlist-feedback">{wishlistFeedback==="saved"?"TERSIMPAN":"DIHAPUS"}</span>:null}
         {count>1?<>
           <button className="gallery-arrow gallery-prev" onClick={prev} aria-label="Foto sebelumnya"><ChevronLeft size={18}/></button>
           <button className="gallery-arrow gallery-next" onClick={next} aria-label="Foto berikutnya"><ChevronRight size={18}/></button>
