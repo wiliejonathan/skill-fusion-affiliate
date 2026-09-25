@@ -7,7 +7,7 @@ import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
 type ResolvedProduct={
   inputUrl:string; finalUrl:string; canonicalUrl:string|null; canonicalProductId:string|null;
-  title:string|null; image:string|null; price:string|null; currency:string|null; ok:boolean; message?:string;
+  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; ok:boolean; message?:string;
 };
 
 const FIRST_LINK="https://s.blibli.com/GNtk/0qrtsw3f";
@@ -25,7 +25,7 @@ const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
     inputUrl:FIRST_LINK,finalUrl:FIRST_FINAL,canonicalUrl:FIRST_CANONICAL,
     canonicalProductId:"ACO-60021-00244-00014",title:FIRST_TITLE,
-    image:"https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg",price:null,currency:null,ok:true
+    image:"https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg",images:["https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full15_ph0p14k5.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full16_mwsi08wd.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full17_fecq856n.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full18_gr5fkrpk.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full44_k26116c9.jpg"],price:null,currency:null,ok:true
   }
 };
 
@@ -68,7 +68,7 @@ export default function AdminPage(){
       }catch{
         next[item.inputUrl]={
           inputUrl:item.inputUrl,finalUrl:item.inputUrl,canonicalUrl:null,canonicalProductId:null,
-          title:"Produk Blibli",image:null,price:null,currency:null,ok:false,
+          title:"Produk Blibli",image:null,images:[],price:null,currency:null,ok:false,
           message:"Link affiliate valid, tetapi metadata belum terbaca."
         };
         newItems.push({affiliateUrl:item.inputUrl});
@@ -140,10 +140,14 @@ export default function AdminPage(){
             const url=item.affiliateUrl||"";
             const meta=resolved[url];
             return <article className="admin-product" key={url||i}>
-              <div className="admin-thumb">{meta?.image?<img src={meta.image} alt=""/>:<span>ACMIC</span>}</div>
+              <div className="admin-thumb">{meta?.images?.[0]||meta?.image?<img src={meta?.images?.[0]||meta?.image||""} alt=""/>:<span>ACMIC</span>}</div>
               <div className="admin-product-body">
                 <strong>{meta?.title||"Produk Blibli"}</strong>
                 <small>{meta?.canonicalProductId||"Affiliate link aktif"}</small>
+                {meta?.images?.length?<div className="admin-gallery">
+                  {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
+                </div>:null}
+                {meta?.images?.length?<small>{meta.images.length} foto produk dari gallery Blibli</small>:null}
                 {meta?.price?<b>{meta.currency==="IDR"?"Rp ":""}{meta.price}</b>:<b>Harga mengikuti Blibli</b>}
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
