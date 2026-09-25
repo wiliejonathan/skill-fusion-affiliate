@@ -82,7 +82,9 @@ export async function GET(req:NextRequest){
       }
 
       const image=pick(html,[
-        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
+        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+        /(https:\\/\\/www\\.static-src\\.com\\/wcsstore\\/Indraprastha\\/images\\/catalog\\/full\\/[^"'\\s<>]+\\.(?:jpg|jpeg|png|webp))/i,
+        /(https:\\/\\/www\\.static-src\\.com\\/wcsstore\\/Indraprastha\\/images\\/catalog\\/[^"'\\s<>]+\\.(?:jpg|jpeg|png|webp))/i
       ]);
       const price=pick(html,[
         /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
