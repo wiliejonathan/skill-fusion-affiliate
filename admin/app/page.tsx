@@ -74,14 +74,17 @@ function inferFeatures(title:string){
 }
 
 function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,ResolvedProduct>):DbProduct[]{
-  return catalog.flatMap((item,index)=>{
+  const products:DbProduct[]=[];
+  catalog.forEach((item,index)=>{
     const affiliateUrl=item.affiliateUrl||"";
     const meta=resolved[affiliateUrl];
     const id=item.canonicalProductId||meta?.canonicalProductId||"";
-    if(!affiliateUrl||!id) return [];
+    if(!affiliateUrl||!id) return;
+
     const name=(meta?.title||"Produk Blibli").trim();
     const images=meta?.images?.length?meta.images:(meta?.image?[meta.image]:[]);
-    const product:DbProduct={
+
+    products.push({
       sequence:item.sequence||index+1,
       id,
       canonicalProductId:id,
@@ -93,9 +96,9 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
       canonicalUrl:item.canonicalUrl||meta?.canonicalUrl||null,
       badge:"Blibli Affiliate",
       features:inferFeatures(name)
-    };
-    return [product];
+    });
   });
+  return products;
 }
 
 function dbToLocal(products:DbProduct[]){
