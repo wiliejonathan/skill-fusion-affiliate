@@ -37,6 +37,58 @@ function extractStaticImages(html:string){
   return [...new Set(matches)].slice(0,40);
 }
 
+function productBaseId(productId:string|null){
+  if(!productId) return null;
+  const parts=productId.split("-");
+  return parts.length>=3?parts.slice(0,3).join("-"):productId;
+}
+
+function slugFromUrl(value:string){
+  try{
+    const u=new URL(value);
+    const marker=u.pathname.includes("/is--")?"/is--":(u.pathname.includes("/ps--")?"/ps--":null);
+    const before=marker?u.pathname.slice(0,u.pathname.indexOf(marker)):u.pathname;
+    return before.split("/").filter(Boolean).pop()||null;
+  }catch{return null}
+}
+
+async function fetchSeoListingImages(sourceUrl:string,productId:string|null,title:string|null){
+  const slug=slugFromUrl(sourceUrl);
+  if(!slug) return [] as string[];
+
+  const seoUrl="https://www.blibli.com/jual/"+slug;
+  try{
+    const res=await fetch(seoUrl,{
+      redirect:"follow",
+      cache:"no-store",
+      headers:{
+        "user-agent":UA,
+        "accept":"text/html,application/xhtml+xml",
+        "accept-language":"id-ID,id;q=0.9,en;q=0.8"
+      }
+    });
+    if(!res.ok) return [];
+
+    const html=normalizeHtmlForImages(await res.text());
+    const baseId=productBaseId(productId);
+    const needles=[baseId,title?.trim()].filter((x):x is string=>Boolean(x));
+
+    for(const needle of needles){
+      const idx=html.toLowerCase().indexOf(needle.toLowerCase());
+      if(idx>=0){
+        const from=Math.max(0,idx-70000);
+        const to=Math.min(html.length,idx+70000);
+        const nearby=extractStaticImages(html.slice(from,to));
+        if(nearby.length) return nearby.slice(0,8);
+      }
+    }
+
+    return extractStaticImages(html).slice(0,8);
+  }catch{
+    return [];
+  }
+}
+
 function productIdFromUrl(value:string){
   try{
     const u=new URL(value);
@@ -118,6 +170,9 @@ export async function GET(req:NextRequest){
       let images=(assetKey?allImages.filter(src=>src.includes(assetKey)):allImages).slice(0,12);
       if(!images.length && productId && KNOWN_IMAGE_GALLERIES[productId]){
         images=KNOWN_IMAGE_GALLERIES[productId];
+      }
+      if(!images.length){
+        images=await fetchSeoListingImages(current,productId,title);
       }
       const image=images[0]||null;
       const price=pick(html,[
