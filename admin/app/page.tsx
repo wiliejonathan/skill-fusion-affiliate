@@ -10,6 +10,20 @@ type ResolvedProduct={
   title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; ok:boolean; message?:string;
 };
 
+type DbProduct={
+  sequence:number;
+  id:string;
+  canonicalProductId:string;
+  name:string;
+  brand:string;
+  category:string;
+  images:string[];
+  affiliateUrl:string;
+  canonicalUrl?:string|null;
+  badge:string;
+  features:string[];
+};
+
 const FIRST_LINK="https://s.blibli.com/GNtk/0qrtsw3f";
 const FIRST_FINAL="https://www.blibli.com/p/acmic-braided-line-kabel-data-charger-100cm-fast-charging-cable-gc100-gl100-gm100/is--ACO-60021-00244-00014?pickupPointCode=PP-3538803&share_link=1&utm_campaign=affiliate_share&utm_content=salin_link&utm_medium=aff_6ab567e244d6d2a8c322863d&utm_source=affiliates";
 const FIRST_CANONICAL="https://www.blibli.com/p/acmic-braided-line-kabel-data-charger-100cm-fast-charging-cable-gc100-gl100-gm100/is--ACO-60021-00244-00014";
@@ -29,9 +43,84 @@ const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
     inputUrl:FIRST_LINK,finalUrl:FIRST_FINAL,canonicalUrl:FIRST_CANONICAL,
     canonicalProductId:"ACO-60021-00244-00014",title:FIRST_TITLE,
-    image:"https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg",images:["https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full15_ph0p14k5.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full16_mwsi08wd.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full17_fecq856n.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full18_gr5fkrpk.jpg","https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full44_k26116c9.jpg"],price:null,currency:null,ok:true
+    image:"https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg",
+    images:[
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg",
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full15_ph0p14k5.jpg",
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full16_mwsi08wd.jpg",
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full17_fecq856n.jpg",
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full//catalog-image/93/MTA-112494305/acmic_acmic_braided_line_kabel_data_fast_charging_iphone-type_c-micro_usb_1m_full18_gr5fkrpk.jpg",
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full44_k26116c9.jpg"
+    ],
+    price:null,currency:null,ok:true
   }
 };
+
+function inferBrand(title:string,id:string){
+  const upper=title.toUpperCase();
+  if(upper.startsWith("XIAOMI")||id.startsWith("XIO-")) return "XIAOMI";
+  if(upper.startsWith("ACMIC")||id.startsWith("ACO-")) return "ACMIC";
+  return (title.split(/\s+/)[0]||"TECH").toUpperCase();
+}
+
+function inferFeatures(title:string){
+  const value=title.toLowerCase();
+  const features:string[]=[];
+  if(/100\s*cm/.test(value)) features.push("100 cm");
+  if(/type\s*-?\s*c|usb\s*c/.test(value)) features.push("USB Type-C");
+  if(/power delivery|\bpd\b/.test(value)) features.push("Power Delivery");
+  else if(/fast\s*charging|6a/.test(value)) features.push("Fast charging");
+  return features.length?features:["Blibli Affiliate"];
+}
+
+function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,ResolvedProduct>):DbProduct[]{
+  return catalog.map((item,index)=>{
+    const affiliateUrl=item.affiliateUrl||"";
+    const meta=resolved[affiliateUrl];
+    const id=item.canonicalProductId||meta?.canonicalProductId||"";
+    if(!affiliateUrl||!id) return null;
+    const name=(meta?.title||"Produk Blibli").trim();
+    const images=meta?.images?.length?meta.images:(meta?.image?[meta.image]:[]);
+    return {
+      sequence:item.sequence||index+1,
+      id,
+      canonicalProductId:id,
+      name,
+      brand:inferBrand(name,id),
+      category:"Charging & Cable",
+      images,
+      affiliateUrl,
+      canonicalUrl:item.canonicalUrl||meta?.canonicalUrl||null,
+      badge:"Blibli Affiliate",
+      features:inferFeatures(name)
+    };
+  }).filter((x):x is DbProduct=>Boolean(x));
+}
+
+function dbToLocal(products:DbProduct[]){
+  const catalog:CatalogIdentity[]=products.map(p=>({
+    sequence:p.sequence,
+    affiliateUrl:p.affiliateUrl,
+    canonicalProductId:p.canonicalProductId,
+    canonicalUrl:p.canonicalUrl||null
+  }));
+  const resolved:Record<string,ResolvedProduct>={};
+  for(const p of products){
+    resolved[p.affiliateUrl]={
+      inputUrl:p.affiliateUrl,
+      finalUrl:p.affiliateUrl,
+      canonicalUrl:p.canonicalUrl||null,
+      canonicalProductId:p.canonicalProductId,
+      title:p.name,
+      image:p.images?.[0]||null,
+      images:p.images||[],
+      price:null,
+      currency:null,
+      ok:true
+    };
+  }
+  return {catalog,resolved};
+}
 
 export default function AdminPage(){
   const [text,setText]=useState("");
@@ -40,8 +129,40 @@ export default function AdminPage(){
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState("");
   const [hydrated,setHydrated]=useState(false);
+  const [serverReady,setServerReady]=useState(false);
+
+  async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
+    const products=buildDbProducts(nextCatalog,nextResolved);
+    if(!products.length) return null;
+    const res=await fetch("/api/catalog",{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({products})
+    });
+    const data=await res.json();
+    if(data?.ok&&Array.isArray(data.products)){
+      setServerReady(true);
+      return data.products as DbProduct[];
+    }
+    return null;
+  }
+
+  async function pullDatabase(){
+    const res=await fetch("/api/catalog",{cache:"no-store"});
+    const data=await res.json();
+    if(data?.ok&&Array.isArray(data.products)){
+      const local=dbToLocal(data.products as DbProduct[]);
+      setCatalog(local.catalog);
+      setResolved(local.resolved);
+      setServerReady(true);
+      return data.products as DbProduct[];
+    }
+    return null;
+  }
 
   useEffect(()=>{
+    let loadedCatalog=initialCatalog;
+    let loadedResolved=initialResolved;
     try{
       const savedCatalog=window.localStorage.getItem(STORAGE_CATALOG_KEY);
       const savedResolved=window.localStorage.getItem(STORAGE_RESOLVED_KEY);
@@ -49,23 +170,35 @@ export default function AdminPage(){
       if(savedCatalog){
         const parsed=JSON.parse(savedCatalog);
         if(Array.isArray(parsed)){
-          const migrated=parsed.map((item:CatalogIdentity,index:number)=>({
+          loadedCatalog=parsed.map((item:CatalogIdentity,index:number)=>({
             ...item,
             sequence:typeof item?.sequence==="number"?item.sequence:index+1
           }));
-          setCatalog(migrated);
+          setCatalog(loadedCatalog);
         }
       }
 
       if(savedResolved){
         const parsed=JSON.parse(savedResolved);
-        if(parsed && typeof parsed==="object" && !Array.isArray(parsed)) setResolved(parsed);
+        if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
+          loadedResolved=parsed;
+          setResolved(parsed);
+        }
       }
     }catch{
-      setNotice("Data lokal sebelumnya tidak bisa dibaca. Katalog default dipakai.");
-    }finally{
-      setHydrated(true);
+      setNotice("Data lokal sebelumnya tidak bisa dibaca. Mengambil katalog server.");
     }
+
+    (async()=>{
+      try{
+        await pushDatabase(loadedCatalog,loadedResolved);
+        await pullDatabase();
+      }catch{
+        setNotice("Koneksi database belum siap. Data lokal tetap dipertahankan.");
+      }finally{
+        setHydrated(true);
+      }
+    })();
   },[]);
 
   useEffect(()=>{
@@ -80,12 +213,12 @@ export default function AdminPage(){
     const missing=catalog.filter(item=>{
       const key=item.affiliateUrl||"";
       const meta=resolved[key];
-      return key && (!meta || !meta.images || meta.images.length===0);
+      return key&&(!meta||!meta.images||meta.images.length===0);
     });
 
     if(!missing.length) return;
-
     let cancelled=false;
+
     (async()=>{
       const patched={...resolved};
       let changed=false;
@@ -104,9 +237,10 @@ export default function AdminPage(){
         }catch{}
       }
 
-      if(!cancelled && changed){
+      if(!cancelled&&changed){
         setResolved(patched);
-        setNotice("Foto produk yang sebelumnya kosong berhasil diperbarui.");
+        await pushDatabase(catalog,patched);
+        setNotice("Foto produk yang sebelumnya kosong berhasil diperbarui dan disinkronkan.");
       }
     })();
 
@@ -129,10 +263,13 @@ export default function AdminPage(){
       setNotice(checks.some(x=>x.status==="DUPLICATE")?"Produk sudah ada di katalog. Tidak dibuat duplikat.":"Tidak ada link baru yang valid.");
       return;
     }
-    setBusy(true); setNotice("");
+
+    setBusy(true);
+    setNotice("");
     const next={...resolved};
     const newItems:CatalogIdentity[]=[];
     let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
+
     for(const item of ready){
       try{
         const res=await fetch("/api/resolve?url="+encodeURIComponent(item.inputUrl),{cache:"no-store"});
@@ -153,11 +290,25 @@ export default function AdminPage(){
         newItems.push({sequence:nextSequence++,affiliateUrl:item.inputUrl});
       }
     }
+
+    const merged=[...catalog,...newItems];
     setResolved(next);
-    setCatalog(prev=>[...prev,...newItems]);
+    setCatalog(merged);
     setText("");
-    setBusy(false);
-    setNotice(`${newItems.length} produk baru berhasil dimasukkan dan tersimpan. Duplicate tidak ditambahkan.`);
+
+    try{
+      const products=await pushDatabase(merged,next);
+      if(products){
+        const local=dbToLocal(products);
+        setCatalog(local.catalog);
+        setResolved(local.resolved);
+      }
+      setNotice(`${newItems.length} produk baru berhasil di-import dan langsung disinkronkan ke Client.`);
+    }catch{
+      setNotice(`${newItems.length} produk masuk lokal, tetapi sinkron database gagal. Coba Refresh Data.`);
+    }finally{
+      setBusy(false);
+    }
   }
 
   async function refreshProduct(url:string){
@@ -171,19 +322,22 @@ export default function AdminPage(){
       const res=await fetch("/api/resolve?url="+encodeURIComponent(source),{cache:"no-store"});
       const data:ResolvedProduct=await res.json();
 
-      setResolved(prev=>({
-        ...prev,
-        [url]:{...prev[url],...data,inputUrl:url}
-      }));
-
-      setCatalog(prev=>prev.map(row=>
+      const nextResolved={
+        ...resolved,
+        [url]:{...resolved[url],...data,inputUrl:url}
+      };
+      const nextCatalog=catalog.map(row=>
         row.affiliateUrl===url
           ? {...row,canonicalProductId:data.canonicalProductId||row.canonicalProductId,canonicalUrl:data.canonicalUrl||row.canonicalUrl}
           : row
-      ));
+      );
+
+      setResolved(nextResolved);
+      setCatalog(nextCatalog);
+      await pushDatabase(nextCatalog,nextResolved);
 
       setNotice(data.images?.length
-        ? `Data produk diperbarui: ${data.images.length} foto ditemukan.`
+        ? `Data produk diperbarui dan tersinkron: ${data.images.length} foto ditemukan.`
         : "Data produk diperbarui, tetapi gallery belum ditemukan otomatis.");
     }catch{
       setNotice("Refresh produk gagal. Coba beberapa saat lagi.");
@@ -192,10 +346,21 @@ export default function AdminPage(){
     }
   }
 
-  function removeLink(url:string){
+  async function removeLink(url:string){
+    const item=catalog.find(x=>x.affiliateUrl===url);
+    const id=item?.canonicalProductId||resolved[url]?.canonicalProductId;
+
     setCatalog(prev=>prev.filter(x=>x.affiliateUrl!==url));
     setResolved(prev=>{const n={...prev};delete n[url];return n});
-    setNotice("Produk dihapus dan perubahan tersimpan.");
+
+    try{
+      if(id){
+        await fetch("/api/catalog?id="+encodeURIComponent(id),{method:"DELETE"});
+      }
+      setNotice("Produk dihapus dan langsung disinkronkan ke Client.");
+    }catch{
+      setNotice("Produk dihapus lokal, tetapi sinkron server gagal.");
+    }
   }
 
   return <main className="shell">
@@ -206,7 +371,7 @@ export default function AdminPage(){
         <a href="#import"><Link2 size={18}/>Import Affiliate</a>
         <a href="#products"><PackageSearch size={18}/>Products</a>
       </nav>
-      <div className="secure"><ShieldCheck size={18}/><span>Website admin terpisah dari website client.</span></div>
+      <div className="secure"><ShieldCheck size={18}/><span>Admin dan Client memakai katalog database yang sama.</span></div>
     </aside>
 
     <section className="content">
@@ -219,14 +384,14 @@ export default function AdminPage(){
         <article><span>Produk tersimpan</span><strong>{catalog.length}</strong><small>produk katalog</small></article>
         <article><span>Link baru</span><strong>{counts.READY||0}</strong><small>siap di-import</small></article>
         <article><span>Duplicate</span><strong>{counts.DUPLICATE||0}</strong><small>otomatis diblokir</small></article>
-        <article><span>Penyimpanan Admin</span><strong>{hydrated?"SAVED":"..."}</strong><small>persisten setelah reload</small></article>
+        <article><span>Database Sync</span><strong>{serverReady?"SYNCED":"..."}</strong><small>{serverReady?"Admin ↔ Client":"menghubungkan..."}</small></article>
       </div>
 
       <section className="panel" id="import">
-        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Paste link baru di sini. Produk yang berhasil di-import sekarang tersimpan otomatis dan tidak hilang saat halaman direload.</p></div><CopyCheck size={24}/></div>
+        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Produk yang berhasil di-import langsung disimpan ke database bersama dan muncul di Client.</p></div><CopyCheck size={24}/></div>
         <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"Paste satu atau banyak link, satu link per baris\nhttps://s.blibli.com/GNtk/..."} />
         <div className="actions">
-          <p><CheckCircle2 size={16}/> Sistem akan resolve shortlink, membaca Product ID, lalu mengecek duplicate sebelum menyimpan.</p>
+          <p><CheckCircle2 size={16}/> Sistem resolve shortlink, membaca Product ID, mengecek duplicate, lalu sinkron ke Client.</p>
           <button onClick={analyzeLinks} disabled={busy||!checks.length}>{busy?"Mengimpor...":"Import Produk"}</button>
         </div>
         {notice&&<div className="notice">{notice}</div>}
@@ -245,7 +410,7 @@ export default function AdminPage(){
       </section>}
 
       <section className="panel" id="products">
-        <div className="panel-title"><div><span className="eyebrow">PRODUCTS</span><h2>Katalog aktif</h2><p>Saat ini hanya ada produk yang kamu berikan sendiri.</p></div></div>
+        <div className="panel-title"><div><span className="eyebrow">PRODUCTS</span><h2>Katalog aktif</h2><p>Katalog ini adalah sumber yang sama dengan website Client.</p></div></div>
         <div className="product-admin-list">
           {catalog.map((item,i)=>{
             const url=item.affiliateUrl||"";
@@ -253,7 +418,7 @@ export default function AdminPage(){
             return <article className="admin-product" key={url||i}>
               <div className="admin-thumb">{meta?.images?.[0]||meta?.image?<img src={meta?.images?.[0]||meta?.image||""} alt=""/>:<span>NO IMAGE</span>}</div>
               <div className="admin-product-body">
-                <strong>{meta?.title||"Produk Blibli"}</strong>
+                <strong>#{String(item.sequence||i+1).padStart(3,"0")} {meta?.title||"Produk Blibli"}</strong>
                 <small>{meta?.canonicalProductId||"Affiliate link aktif"}</small>
                 {meta?.images?.length?<div className="admin-gallery">
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
