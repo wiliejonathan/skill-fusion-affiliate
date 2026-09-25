@@ -11,6 +11,13 @@ function pick(html:string,patterns:RegExp[]){
 }
 
 const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
+  "XIO-60022-01141-00001":[
+    "https://4phones.eu/cdn/shop/files/90000810874_A.jpg?v=1770447730",
+    "https://xlineparts.com/storage/images/products/1738406224_7799.jpg"
+  ],
+  "ACO-60021-00234-00001":[
+    "https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"
+  ],
   "ACO-60021-00070-00001":[
     "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-3937306/acmic_acmic_fc100_kabel_data_charger_usb_type_c_100cm_fast_charging_cable_-_hitam_full14_ge6ro4m0.jpeg",
     "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-3937306/acmic_acmic_fc100_kabel_data_charger_usb_type_c_100cm_fast_charging_cable_-_hitam_full15_frg35cse.png",
