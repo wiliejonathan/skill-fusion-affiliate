@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect,useMemo,useState} from "react";
-import {CheckCircle2,CopyCheck,ExternalLink,LayoutDashboard,Link2,PackageSearch,ShieldCheck,Trash2} from "lucide-react";
+import {CheckCircle2,CopyCheck,ExternalLink,LayoutDashboard,Link2,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
 import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
@@ -67,6 +67,45 @@ export default function AdminPage(){
     window.localStorage.setItem(STORAGE_RESOLVED_KEY,JSON.stringify(resolved));
   },[catalog,resolved,hydrated]);
 
+  useEffect(()=>{
+    if(!hydrated) return;
+
+    const missing=catalog.filter(item=>{
+      const key=item.affiliateUrl||"";
+      const meta=resolved[key];
+      return key && (!meta || !meta.images || meta.images.length===0);
+    });
+
+    if(!missing.length) return;
+
+    let cancelled=false;
+    (async()=>{
+      const patched={...resolved};
+      let changed=false;
+
+      for(const item of missing){
+        const key=item.affiliateUrl||"";
+        const meta=patched[key];
+        const source=item.canonicalUrl||meta?.canonicalUrl||key;
+        try{
+          const res=await fetch("/api/resolve?url="+encodeURIComponent(source),{cache:"no-store"});
+          const data:ResolvedProduct=await res.json();
+          if(data?.images?.length){
+            patched[key]={...meta,...data,inputUrl:key};
+            changed=true;
+          }
+        }catch{}
+      }
+
+      if(!cancelled && changed){
+        setResolved(patched);
+        setNotice("Foto produk yang sebelumnya kosong berhasil diperbarui.");
+      }
+    })();
+
+    return ()=>{cancelled=true};
+  },[hydrated]);
+
   const checks=useMemo(()=>{
     const lines=[...new Set(text.split(/\r?\n|\s+(?=https?:\/\/)/).map(x=>x.trim()).filter(Boolean))];
     const candidates:Array<ImportCandidate|{invalidUrl:string}>=lines.map(line=>{
@@ -110,6 +149,38 @@ export default function AdminPage(){
     setText("");
     setBusy(false);
     setNotice(`${newItems.length} produk baru berhasil dimasukkan dan tersimpan. Duplicate tidak ditambahkan.`);
+  }
+
+  async function refreshProduct(url:string){
+    const item=catalog.find(x=>x.affiliateUrl===url);
+    const meta=resolved[url];
+    const source=item?.canonicalUrl||meta?.canonicalUrl||url;
+
+    setBusy(true);
+    setNotice("");
+    try{
+      const res=await fetch("/api/resolve?url="+encodeURIComponent(source),{cache:"no-store"});
+      const data:ResolvedProduct=await res.json();
+
+      setResolved(prev=>({
+        ...prev,
+        [url]:{...prev[url],...data,inputUrl:url}
+      }));
+
+      setCatalog(prev=>prev.map(row=>
+        row.affiliateUrl===url
+          ? {...row,canonicalProductId:data.canonicalProductId||row.canonicalProductId,canonicalUrl:data.canonicalUrl||row.canonicalUrl}
+          : row
+      ));
+
+      setNotice(data.images?.length
+        ? `Data produk diperbarui: ${data.images.length} foto ditemukan.`
+        : "Data produk diperbarui, tetapi gallery belum ditemukan otomatis.");
+    }catch{
+      setNotice("Refresh produk gagal. Coba beberapa saat lagi.");
+    }finally{
+      setBusy(false);
+    }
   }
 
   function removeLink(url:string){
@@ -182,6 +253,7 @@ export default function AdminPage(){
                 {meta?.price?<b>{meta.currency==="IDR"?"Rp ":""}{meta.price}</b>:<b>Harga mengikuti Blibli</b>}
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
+                  <button onClick={()=>refreshProduct(url)} disabled={busy}><RefreshCw size={15}/>Refresh Data</button>
                   <button onClick={()=>removeLink(url)}><Trash2 size={15}/>Hapus</button>
                 </div>
               </div>
