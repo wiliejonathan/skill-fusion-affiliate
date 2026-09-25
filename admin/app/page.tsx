@@ -242,14 +242,14 @@ export default function AdminPage(){
             const url=item.affiliateUrl||"";
             const meta=resolved[url];
             return <article className="admin-product" key={url||i}>
-              <div className="admin-thumb">{meta?.images?.[0]||meta?.image?<img src={meta?.images?.[0]||meta?.image||""} alt=""/>:<span>ACMIC</span>}</div>
+              <div className="admin-thumb">{meta?.images?.[0]||meta?.image?<img src={meta?.images?.[0]||meta?.image||""} alt=""/>:<span>NO IMAGE</span>}</div>
               <div className="admin-product-body">
                 <strong>{meta?.title||"Produk Blibli"}</strong>
                 <small>{meta?.canonicalProductId||"Affiliate link aktif"}</small>
                 {meta?.images?.length?<div className="admin-gallery">
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
                 </div>:null}
-                {meta?.images?.length?<small>{meta.images.length} foto produk dari gallery Blibli</small>:null}
+                {meta?.images?.length?<small>{meta.images.length} foto produk berhasil ditemukan</small>:<small>Foto belum terbaca — gunakan Refresh Data</small>}
                 {meta?.price?<b>{meta.currency==="IDR"?"Rp ":""}{meta.price}</b>:<b>Harga mengikuti Blibli</b>}
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
