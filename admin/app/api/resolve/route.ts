@@ -20,6 +20,31 @@ function productIdFromUrl(value:string){
   }catch{return null}
 }
 
+function canonicalProductUrl(value:string){
+  try{
+    const u=new URL(value);
+    return u.origin+u.pathname.replace(/\/$/,"");
+  }catch{return value}
+}
+
+function titleFromUrl(value:string){
+  try{
+    const u=new URL(value);
+    const marker="/is--";
+    const i=u.pathname.indexOf(marker);
+    const before=i>=0?u.pathname.slice(0,i):u.pathname;
+    const slug=before.split("/").filter(Boolean).pop()||"Produk Blibli";
+    return slug
+      .split("-")
+      .filter(Boolean)
+      .map((part,index)=>{
+        if(/^\d/.test(part)||/^[a-z]+\d+$/i.test(part)) return part.toUpperCase();
+        return index===0?part.toUpperCase():part;
+      })
+      .join(" ");
+  }catch{return "Produk Blibli"}
+}
+
 export async function GET(req:NextRequest){
   const raw=req.nextUrl.searchParams.get("url");
   if(!raw) return NextResponse.json({ok:false,message:"url wajib diisi"},{status:400});
@@ -28,8 +53,7 @@ export async function GET(req:NextRequest){
   try{
     for(let i=0;i<6;i++){
       const res=await fetch(current,{
-        redirect:"manual",
-        cache:"no-store",
+        redirect:"manual",cache:"no-store",
         headers:{"user-agent":UA,"accept":"text/html,application/xhtml+xml"}
       });
 
@@ -41,14 +65,22 @@ export async function GET(req:NextRequest){
       }
 
       const html=await res.text();
-      const canonical=pick(html,[
+      const canonicalMeta=pick(html,[
         /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
         /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i
-      ])||current;
-      const title=pick(html,[
+      ]);
+      const canonical=canonicalProductUrl(
+        canonicalMeta&&canonicalMeta.includes("/is--")?canonicalMeta:current
+      );
+
+      let title=pick(html,[
         /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
         /<title[^>]*>([^<]+)<\/title>/i
       ]);
+      if(!title||/online mall blibli|belanja online aman/i.test(title)){
+        title=titleFromUrl(current);
+      }
+
       const image=pick(html,[
         /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
       ]);
@@ -68,16 +100,17 @@ export async function GET(req:NextRequest){
       });
     }
 
+    const canonical=canonicalProductUrl(current);
     return NextResponse.json({
-      ok:true,inputUrl:raw,finalUrl:current,canonicalUrl:current,
-      canonicalProductId:productIdFromUrl(current),title:null,image:null,price:null,currency:null,
-      message:"Redirect selesai; metadata halaman belum tersedia."
+      ok:true,inputUrl:raw,finalUrl:current,canonicalUrl:canonical,
+      canonicalProductId:productIdFromUrl(current),title:titleFromUrl(current),
+      image:null,price:null,currency:null
     });
   }catch{
     return NextResponse.json({
       ok:false,inputUrl:raw,finalUrl:current,canonicalUrl:null,canonicalProductId:null,
-      title:null,image:null,price:null,currency:null,
-      message:"Link affiliate tetap valid, tetapi metadata belum bisa dibaca otomatis."
+      title:"Produk Blibli",image:null,price:null,currency:null,
+      message:"Link affiliate valid, tetapi metadata belum bisa dibaca otomatis."
     });
   }
 }
