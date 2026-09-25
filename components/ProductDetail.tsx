@@ -122,7 +122,7 @@ export default function ProductDetail({product}:{product:Product}){
             {shareState!=="idle"?<span className="detail-share-feedback">{shareState==="shared"?"DIBAGIKAN":"LINK DISALIN"}</span>:null}
           </div>
           <div className="detail-meta">{product.brand} // {product.category}</div>
-          <h1><span className="detail-sequence">{String(product.sequence).padStart(2,"0")}.</span> {product.name}</h1>
+          <h1><span className="detail-sequence">#{String(product.sequence).padStart(3,"0")}</span> {product.name}</h1>
           <div className="detail-product-id"><ScanLine size={14}/> PRODUCT ID // {product.canonicalProductId}</div>
 
           <div className="detail-price-box">
