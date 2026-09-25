@@ -5,19 +5,19 @@ import {ArrowRight,AtSign,Cpu,Filter,Heart,Search,ShieldCheck,Sparkles,X,Zap} fr
 import Link from "next/link";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
-import {categories} from "@/lib/products";
+import {categories,type Product} from "@/lib/products";
 import {useSyncedProducts} from "@/lib/useSyncedProducts";
 import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
 
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
 const IG_BRAND="https://www.instagram.com/skill.fusion.id/";
 
-export default function Marketplace(){
+export default function Marketplace({initialProducts}:{initialProducts:Product[]}){
   const [query,setQuery]=useState("");
   const [category,setCategory]=useState("Semua");
   const [mobileFilters,setMobileFilters]=useState(false);
   const [wishlist,setWishlist]=useState<string[]>([]);
-  const {products,lastSync}=useSyncedProducts();
+  const {products,lastSync}=useSyncedProducts(initialProducts);
 
   useEffect(()=>{
     setWishlist(readWishlist());
