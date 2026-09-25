@@ -1,4 +1,5 @@
 export type Product={
+  sequence:number;
   id:string;
   name:string;
   brand:string;
@@ -14,6 +15,7 @@ export const categories=["Semua","Charging & Cable"];
 
 export const products:Product[]=[
 {
+  sequence:1,
   id:"ACO-60021-00244-00014",
   canonicalProductId:"ACO-60021-00244-00014",
   name:"ACMIC Braided Line Kabel Data Charger 100cm Fast Charging Cable GC100 / GL100 / GM100",
@@ -32,6 +34,7 @@ export const products:Product[]=[
   features:["100 cm","Braided cable","Fast charging"]
 },
 {
+  sequence:2,
   id:"ACO-60021-00070-00001",
   canonicalProductId:"ACO-60021-00070-00001",
   name:"ACMIC FC100 CFC100 Kabel Data Charger USB Type C 100CM Fast Charging Cable Hitam",
