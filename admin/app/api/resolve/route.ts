@@ -122,6 +122,47 @@ function chooseDominantGallery(images:string[]){
   return [...new Set(best)].slice(0,12);
 }
 
+async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null){
+  if(!productId) return {title:null as string|null,images:[] as string[]};
+
+  try{
+    const source=new URL(sourceUrl);
+    const pickupPointCode=source.searchParams.get("pickupPointCode");
+    const endpoint=new URL(
+      "https://www.blibli.com/backend/product-detail/products/is--"+
+      encodeURIComponent(productId)+"/_summary"
+    );
+    if(pickupPointCode) endpoint.searchParams.set("pickupPointCode",pickupPointCode);
+
+    const res=await fetch(endpoint.toString(),{
+      cache:"no-store",
+      redirect:"follow",
+      headers:{
+        "user-agent":UA,
+        "accept":"application/json,text/plain,*/*",
+        "accept-language":"id-ID,id;q=0.9,en;q=0.8",
+        "referer":canonicalProductUrl(sourceUrl),
+        "pragma":"no-cache",
+        "cache-control":"no-cache"
+      }
+    });
+    if(!res.ok) return {title:null,images:[]};
+
+    const payload=await res.json();
+    const data=payload?.data||payload;
+    const images=(Array.isArray(data?.images)?data.images:[])
+      .map((item:any)=>item?.full||item?.large||item?.medium||item?.thumbnail||null)
+      .filter((x:any):x is string=>typeof x==="string"&&/^https?:\/\//i.test(x));
+
+    return {
+      title:typeof data?.name==="string"?data.name.trim():null,
+      images:[...new Set(images)].slice(0,20)
+    };
+  }catch{
+    return {title:null,images:[]};
+  }
+}
+
 async function fetchBlibliProductSeoGallery(sourceUrl:string,productId:string|null,title:string|null){
   const canonical=canonicalProductUrl(sourceUrl);
   const baseId=productBaseId(productId);
@@ -299,9 +340,17 @@ export async function GET(req:NextRequest){
       const extractedImages=extractStaticImages(html);
       const allImages=[...new Set([ogImage,...extractedImages].filter((x):x is string=>Boolean(x)))];
       const assetKey=(ogImage||allImages[0]||"").match(/MTA-\d+/)?.[0]||null;
-      let images=(assetKey?allImages.filter(src=>src.includes(assetKey)):allImages).slice(0,12);
-      // First try a fresh SEO/product-page pass. Blibli often exposes the full
-      // gallery to crawler/mobile HTML even when the normal page HTML is sparse.
+      let images=(assetKey?allImages.filter(src=>src.includes(assetKey)):allImages).slice(0,20);
+
+      // Prefer Blibli's own product-detail JSON endpoint. It exposes the exact
+      // selected SKU gallery even when the HTML response itself is sparse.
+      const summary=await fetchBlibliSummaryGallery(current,productId);
+      if(summary.title) title=summary.title;
+      if(summary.images.length>images.length){
+        images=summary.images;
+      }
+
+      // Then try a fresh SEO/product-page pass as another source of gallery media.
       const seoGallery=await fetchBlibliProductSeoGallery(canonical,productId,title);
       if(seoGallery.length>images.length){
         images=seoGallery;
@@ -318,7 +367,7 @@ export async function GET(req:NextRequest){
       }
 
       // Keep only one coherent product-gallery asset group when possible.
-      if(images.some(src=>/MTA-d+/i.test(src))){
+      if(images.some(src=>/MTA-\d+/i.test(src))){
         const coherent=chooseDominantGallery(images);
         if(coherent.length>=2) images=coherent;
       }
