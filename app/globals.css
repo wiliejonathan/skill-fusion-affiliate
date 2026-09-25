@@ -72,3 +72,7 @@ button,input,select{font:inherit}button{cursor:pointer}
   .product-grid{gap:8px}.product-visual{min-height:132px}.product-icon{font-size:45px}.product-badge{max-width:calc(100% - 86px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card-actions .icon-btn{width:31px;height:31px}
   .feature-list span:nth-child(n+3){display:none}.compare-bar{bottom:12px}
 }
+
+.cta-btn{display:flex;align-items:center;justify-content:center;gap:7px;text-decoration:none}
+.live-note{color:var(--muted);font-size:11px}
+@media(min-width:1181px){.product-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.product-grid>.product-card:only-child{max-width:320px}}
