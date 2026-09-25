@@ -99,6 +99,91 @@ function slugFromUrl(value:string){
   }catch{return null}
 }
 
+
+function groupCatalogImagesByAsset(images:string[]){
+  const groups=new Map<string,string[]>();
+  for(const src of images){
+    const asset=src.match(/MTA-\d+/i)?.[0]||"__NO_ASSET__";
+    const list=groups.get(asset)||[];
+    if(!list.includes(src)) list.push(src);
+    groups.set(asset,list);
+  }
+  return groups;
+}
+
+function chooseDominantGallery(images:string[]){
+  const groups=[...groupCatalogImagesByAsset(images).entries()]
+    .filter(([asset])=>asset!=="__NO_ASSET__")
+    .sort((a,b)=>b[1].length-a[1].length);
+
+  if(!groups.length) return [...new Set(images)].slice(0,12);
+
+  const [,best]=groups[0];
+  return [...new Set(best)].slice(0,12);
+}
+
+async function fetchBlibliProductSeoGallery(sourceUrl:string,productId:string|null,title:string|null){
+  const canonical=canonicalProductUrl(sourceUrl);
+  const baseId=productBaseId(productId);
+  const userAgents=[
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/143 Mobile Safari/537.36",
+    UA
+  ];
+
+  const collected:string[]=[];
+
+  for(const ua of userAgents){
+    try{
+      const res=await fetch(canonical,{
+        redirect:"follow",
+        cache:"no-store",
+        headers:{
+          "user-agent":ua,
+          "accept":"text/html,application/xhtml+xml",
+          "accept-language":"id-ID,id;q=0.9,en;q=0.8",
+          "pragma":"no-cache",
+          "cache-control":"no-cache"
+        }
+      });
+      if(!res.ok) continue;
+
+      const html=normalizeHtmlForImages(await res.text());
+      const candidates=extractStaticImages(html);
+      for(const src of candidates){
+        if(!collected.includes(src)) collected.push(src);
+      }
+
+      // Product gallery images on Blibli share one MTA asset id.
+      // Recommendations usually contribute one image each, so the largest
+      // same-asset group is the safest product-gallery candidate.
+      const dominant=chooseDominantGallery(collected);
+      if(dominant.length>=4) return dominant;
+
+      // If the SEO page exposes a concentrated block around the product id/title,
+      // inspect that block before falling back to a global dominant group.
+      const needles=[productId,baseId,title?.trim()]
+        .filter((x):x is string=>Boolean(x));
+      for(const needle of needles){
+        const lower=html.toLowerCase();
+        let idx=lower.indexOf(needle.toLowerCase());
+        while(idx>=0){
+          const from=Math.max(0,idx-180000);
+          const to=Math.min(html.length,idx+180000);
+          const near=chooseDominantGallery(extractStaticImages(html.slice(from,to)));
+          for(const src of near){
+            if(!collected.includes(src)) collected.push(src);
+          }
+          if(near.length>=4) return near;
+          idx=lower.indexOf(needle.toLowerCase(),idx+needle.length);
+        }
+      }
+    }catch{}
+  }
+
+  return chooseDominantGallery(collected);
+}
+
 async function fetchSeoListingImages(sourceUrl:string,productId:string|null,title:string|null){
   const slug=slugFromUrl(sourceUrl);
   if(!slug) return [] as string[];
@@ -215,6 +300,13 @@ export async function GET(req:NextRequest){
       const allImages=[...new Set([ogImage,...extractedImages].filter((x):x is string=>Boolean(x)))];
       const assetKey=(ogImage||allImages[0]||"").match(/MTA-\d+/)?.[0]||null;
       let images=(assetKey?allImages.filter(src=>src.includes(assetKey)):allImages).slice(0,12);
+      // First try a fresh SEO/product-page pass. Blibli often exposes the full
+      // gallery to crawler/mobile HTML even when the normal page HTML is sparse.
+      const seoGallery=await fetchBlibliProductSeoGallery(canonical,productId,title);
+      if(seoGallery.length>images.length){
+        images=seoGallery;
+      }
+
       if(!images.length && productId && KNOWN_IMAGE_GALLERIES[productId]){
         images=KNOWN_IMAGE_GALLERIES[productId];
       }
@@ -224,6 +316,13 @@ export async function GET(req:NextRequest){
       if(!images.length){
         images=await fetchOfficialFallbackImages(productId);
       }
+
+      // Keep only one coherent product-gallery asset group when possible.
+      if(images.some(src=>/MTA-d+/i.test(src))){
+        const coherent=chooseDominantGallery(images);
+        if(coherent.length>=2) images=coherent;
+      }
+
       const image=images[0]||null;
       const price=pick(html,[
         /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
