@@ -1,10 +1,12 @@
 "use client";
 
-import {useMemo,useState} from "react";
-import {ArrowRight,AtSign,Cpu,Filter,Search,ShieldCheck,Sparkles,X,Zap} from "lucide-react";
+import {useEffect,useMemo,useState} from "react";
+import {ArrowRight,AtSign,Cpu,Filter,Heart,Search,ShieldCheck,Sparkles,X,Zap} from "lucide-react";
+import Link from "next/link";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
 import {categories,products} from "@/lib/products";
+import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
 
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
 const IG_BRAND="https://www.instagram.com/skill.fusion.id/";
@@ -15,6 +17,17 @@ export default function Marketplace(){
   const [mobileFilters,setMobileFilters]=useState(false);
   const [wishlist,setWishlist]=useState<string[]>([]);
 
+  useEffect(()=>{
+    setWishlist(readWishlist());
+    const sync=()=>setWishlist(readWishlist());
+    window.addEventListener("storage",sync);
+    window.addEventListener("skillfusion:wishlist",sync as EventListener);
+    return ()=>{
+      window.removeEventListener("storage",sync);
+      window.removeEventListener("skillfusion:wishlist",sync as EventListener);
+    };
+  },[]);
+
   const filtered=useMemo(()=>{
     const q=query.trim().toLowerCase();
     return products.filter(p=>{
@@ -24,7 +37,7 @@ export default function Marketplace(){
   },[query,category]);
 
   function toggleWishlist(id:string){
-    setWishlist(cur=>cur.includes(id)?cur.filter(x=>x!==id):[...cur,id]);
+    setWishlist(toggleWishlistId(id));
   }
 
   function scrollProducts(){
@@ -66,7 +79,10 @@ export default function Marketplace(){
         <div className="desktop-search tech-search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search curated tech..."/></div>
         <div className="header-actions">
           <a className="header-ig" href={IG_BRAND} target="_blank" rel="noreferrer"><AtSign size={17}/><span>@skill.fusion.id</span></a>
-          <span className="wishlist-chip">WISHLIST {String(wishlist.length).padStart(2,"0")}</span>
+          <Link className="wishlist-chip wishlist-link" href="/wishlist" aria-label="Buka wishlist">
+            <Heart size={14} fill={wishlist.length?"currentColor":"none"}/>
+            <span>WISHLIST {String(wishlist.length).padStart(2,"0")}</span>
+          </Link>
         </div>
       </div>
     </header>
