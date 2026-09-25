@@ -10,6 +10,15 @@ function pick(html:string,patterns:RegExp[]){
   return null;
 }
 
+function extractStaticImage(html:string){
+  const needle="https://www.static-src.com/wcsstore/Indraprastha/images/catalog/";
+  const start=html.indexOf(needle);
+  if(start<0) return null;
+  const tail=html.slice(start);
+  const match=tail.match(/^[^"'\s<>]+/);
+  return match?.[0]||null;
+}
+
 function productIdFromUrl(value:string){
   try{
     const u=new URL(value);
@@ -82,10 +91,8 @@ export async function GET(req:NextRequest){
       }
 
       const image=pick(html,[
-        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-        /(https:\\/\\/www\\.static-src\\.com\\/wcsstore\\/Indraprastha\\/images\\/catalog\\/full\\/[^"'\\s<>]+\\.(?:jpg|jpeg|png|webp))/i,
-        /(https:\\/\\/www\\.static-src\\.com\\/wcsstore\\/Indraprastha\\/images\\/catalog\\/[^"'\\s<>]+\\.(?:jpg|jpeg|png|webp))/i
-      ]);
+        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
+      ])||extractStaticImage(html);
       const price=pick(html,[
         /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
         /"price"\s*:\s*"?(\d+(?:\.\d+)?)"?/i
