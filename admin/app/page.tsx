@@ -25,7 +25,7 @@ const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
     inputUrl:FIRST_LINK,finalUrl:FIRST_FINAL,canonicalUrl:FIRST_CANONICAL,
     canonicalProductId:"ACO-60021-00244-00014",title:FIRST_TITLE,
-    image:null,price:null,currency:null,ok:true
+    image:"https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-112494305/acmic_acmic_braided_line_kabel_data_charger_100cm_fast_charging_cable_-gc100-gl100-gm100-_full45_njeqi5ul.jpg",price:null,currency:null,ok:true
   }
 };
 
