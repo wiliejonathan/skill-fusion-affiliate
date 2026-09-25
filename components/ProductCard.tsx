@@ -2,7 +2,7 @@
 
 import {useState} from "react";
 import {useRouter} from "next/navigation";
-import {ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine} from "lucide-react";
+import {Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2} from "lucide-react";
 import type {Product} from "@/lib/products";
 
 type Props={product:Product;wished:boolean;onWishlist:(id:string)=>void};
@@ -11,6 +11,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   const router=useRouter();
   const [active,setActive]=useState(0);
   const [navigating,setNavigating]=useState(false);
+  const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const images=p.images||[];
   const count=images.length;
   const detailUrl=`/product/${encodeURIComponent(p.id)}`;
@@ -22,6 +23,40 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   }
 
   function stop(e:React.MouseEvent){e.stopPropagation()}
+
+  async function shareProduct(e:React.MouseEvent){
+    stop(e);
+    const url=window.location.origin+detailUrl;
+    const data={title:p.name,text:`Lihat ${p.name} di Skill Fusion`,url};
+
+    try{
+      if(navigator.share){
+        await navigator.share(data);
+        setShareState("shared");
+      }else{
+        await navigator.clipboard.writeText(url);
+        setShareState("copied");
+      }
+    }catch(err){
+      if(err instanceof DOMException && err.name==="AbortError") return;
+      try{
+        await navigator.clipboard.writeText(url);
+        setShareState("copied");
+      }catch{
+        const temp=document.createElement("textarea");
+        temp.value=url;
+        temp.style.position="fixed";
+        temp.style.opacity="0";
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand("copy");
+        temp.remove();
+        setShareState("copied");
+      }
+    }
+
+    window.setTimeout(()=>setShareState("idle"),1800);
+  }
 
   const prev=(e:React.MouseEvent)=>{stop(e);setActive(i=>(i-1+count)%count)};
   const next=(e:React.MouseEvent)=>{stop(e);setActive(i=>(i+1)%count)};
@@ -40,8 +75,12 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
         {images[active]?<img className="product-photo" src={images[active]} alt={p.name+` foto ${active+1}`}/>:null}
         <span className="product-badge">{p.badge}</span>
         <div className="card-actions">
+          <button className="icon-btn share-icon-btn" onClick={shareProduct} aria-label="Bagikan produk">
+            {shareState==="idle"?<Share2 size={17}/>:<Check size={17}/>}
+          </button>
           <button className={wished?"icon-btn active":"icon-btn"} onClick={e=>{stop(e);onWishlist(p.id)}} aria-label="Wishlist"><Heart size={17} fill={wished?"currentColor":"none"}/></button>
         </div>
+        {shareState!=="idle"?<span className="share-feedback">{shareState==="shared"?"SHARED":"LINK COPIED"}</span>:null}
         {count>1?<>
           <button className="gallery-arrow gallery-prev" onClick={prev} aria-label="Foto sebelumnya"><ChevronLeft size={18}/></button>
           <button className="gallery-arrow gallery-next" onClick={next} aria-label="Foto berikutnya"><ChevronRight size={18}/></button>
