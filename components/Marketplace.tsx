@@ -91,7 +91,7 @@ export default function Marketplace(){
         <div className="hero-scan"/>
         <div className="hero-copy">
           <div className="hero-kicker"><span className="bracket">[</span> CURATED TECHNOLOGY INTELLIGENCE <span className="bracket">]</span></div>
-          <h1><span>SMART TECH.</span><br/><strong>BETTER SIGNAL.</strong></h1>
+          <h1 className="hero-title"><span className="hero-title-line hero-title-primary">SMART TECH</span><span className="hero-title-line hero-title-secondary">BETTER SIGNAL</span></h1>
           <p>Skill Fusion menyaring gadget dan teknologi yang layak dipertimbangkan—dengan katalog ringkas, foto produk lengkap, dan jalur langsung ke penawaran affiliate.</p>
           <div className="identity-strip">
             <div><small>OWNER</small><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a></div>
