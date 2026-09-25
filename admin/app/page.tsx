@@ -16,6 +16,7 @@ const FIRST_CANONICAL="https://www.blibli.com/p/acmic-braided-line-kabel-data-ch
 const FIRST_TITLE="ACMIC Braided Line Kabel Data Charger 100cm Fast Charging Cable GC100 / GL100 / GM100";
 
 const initialCatalog:CatalogIdentity[]=[{
+  sequence:1,
   affiliateUrl:FIRST_LINK,
   canonicalProductId:"ACO-60021-00244-00014",
   canonicalUrl:FIRST_CANONICAL
@@ -47,7 +48,13 @@ export default function AdminPage(){
 
       if(savedCatalog){
         const parsed=JSON.parse(savedCatalog);
-        if(Array.isArray(parsed)) setCatalog(parsed);
+        if(Array.isArray(parsed)){
+          const migrated=parsed.map((item:CatalogIdentity,index:number)=>({
+            ...item,
+            sequence:typeof item?.sequence==="number"?item.sequence:index+1
+          }));
+          setCatalog(migrated);
+        }
       }
 
       if(savedResolved){
@@ -125,12 +132,14 @@ export default function AdminPage(){
     setBusy(true); setNotice("");
     const next={...resolved};
     const newItems:CatalogIdentity[]=[];
+    let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
     for(const item of ready){
       try{
         const res=await fetch("/api/resolve?url="+encodeURIComponent(item.inputUrl),{cache:"no-store"});
         const data:ResolvedProduct=await res.json();
         next[item.inputUrl]=data;
         newItems.push({
+          sequence:nextSequence++,
           affiliateUrl:item.inputUrl,
           canonicalProductId:data.canonicalProductId,
           canonicalUrl:data.canonicalUrl
@@ -141,7 +150,7 @@ export default function AdminPage(){
           title:"Produk Blibli",image:null,images:[],price:null,currency:null,ok:false,
           message:"Link affiliate valid, tetapi metadata belum terbaca."
         };
-        newItems.push({affiliateUrl:item.inputUrl});
+        newItems.push({sequence:nextSequence++,affiliateUrl:item.inputUrl});
       }
     }
     setResolved(next);
