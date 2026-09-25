@@ -1,6 +1,7 @@
 import type {ImportCandidate} from "./importer";
 
 export type CatalogIdentity={
+  sequence?:number;
   canonicalProductId?:string|null;
   canonicalUrl?:string|null;
   affiliateUrl?:string|null;
