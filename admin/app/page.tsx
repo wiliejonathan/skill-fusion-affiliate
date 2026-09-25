@@ -112,7 +112,7 @@ export default function AdminPage(){
       </div>
 
       <section className="panel" id="import">
-        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Paste link baru di sini. Shortlink Blibli langsung diproses; kamu tidak perlu melihat status teknis seperti NEEDS_RESOLVE.</p></div><CopyCheck size={24}/></div>
+        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Paste link baru di sini. Shortlink Blibli langsung diproses otomatis; detail teknis resolver disembunyikan dari dashboard.</p></div><CopyCheck size={24}/></div>
         <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"Paste satu atau banyak link, satu link per baris\nhttps://s.blibli.com/GNtk/..."} />
         <div className="actions">
           <p><CheckCircle2 size={16}/> Sistem akan resolve shortlink, membaca Product ID, lalu mengecek duplicate sebelum menyimpan.</p>
