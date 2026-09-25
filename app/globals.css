@@ -628,3 +628,6 @@ button,a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   .banner-socials a svg{width:14px;height:14px}
   .banner-socials a span:before{width:4px;height:4px;margin-right:5px}
 }
+
+.product-sequence{color:var(--cyan);font-weight:900;letter-spacing:.02em}
+.detail-sequence{color:var(--cyan);font-weight:900}
