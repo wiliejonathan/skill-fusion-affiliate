@@ -134,6 +134,8 @@ export default function AdminPage(){
   const [notice,setNotice]=useState("");
   const [hydrated,setHydrated]=useState(false);
   const [serverReady,setServerReady]=useState(false);
+  const [refreshingUrl,setRefreshingUrl]=useState<string|null>(null);
+  const [productNotice,setProductNotice]=useState<Record<string,string>>({});
 
   async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
     const products=buildDbProducts(nextCatalog,nextResolved);
@@ -316,37 +318,72 @@ export default function AdminPage(){
   }
 
   async function refreshProduct(url:string){
-    const item=catalog.find(x=>x.affiliateUrl===url);
-    const meta=resolved[url];
-    const source=item?.canonicalUrl||meta?.canonicalUrl||url;
+    if(refreshingUrl) return;
 
-    setBusy(true);
-    setNotice("");
+    const item=catalog.find(x=>x.affiliateUrl===url);
+    const previous=resolved[url];
+    const source=url||item?.canonicalUrl||previous?.canonicalUrl||"";
+
+    setRefreshingUrl(url);
+    setProductNotice(prev=>({...prev,[url]:"Mengambil ulang data produk..."}));
+
     try{
-      const res=await fetch("/api/resolve?url="+encodeURIComponent(source),{cache:"no-store"});
+      const res=await fetch(
+        "/api/resolve?url="+encodeURIComponent(source)+"&refresh="+Date.now(),
+        {cache:"no-store"}
+      );
       const data:ResolvedProduct=await res.json();
 
-      const nextResolved={
-        ...resolved,
-        [url]:{...resolved[url],...data,inputUrl:url}
+      if(!res.ok||!data?.ok){
+        throw new Error(data?.message||"Resolver gagal");
+      }
+
+      const merged:ResolvedProduct={
+        ...previous,
+        ...data,
+        inputUrl:url,
+        title:data.title||previous?.title||"Produk Blibli",
+        canonicalUrl:data.canonicalUrl||previous?.canonicalUrl||item?.canonicalUrl||null,
+        canonicalProductId:data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null,
+        image:data.image||data.images?.[0]||previous?.image||previous?.images?.[0]||null,
+        images:data.images?.length?data.images:(previous?.images||[])
       };
+
+      const nextResolved={...resolved,[url]:merged};
       const nextCatalog=catalog.map(row=>
         row.affiliateUrl===url
-          ? {...row,canonicalProductId:data.canonicalProductId||row.canonicalProductId,canonicalUrl:data.canonicalUrl||row.canonicalUrl}
+          ? {
+              ...row,
+              canonicalProductId:merged.canonicalProductId||row.canonicalProductId,
+              canonicalUrl:merged.canonicalUrl||row.canonicalUrl
+            }
           : row
       );
 
       setResolved(nextResolved);
       setCatalog(nextCatalog);
-      await pushDatabase(nextCatalog,nextResolved);
 
-      setNotice(data.images?.length
-        ? `Data produk diperbarui dan tersinkron: ${data.images.length} foto ditemukan.`
-        : "Data produk diperbarui, tetapi gallery belum ditemukan otomatis.");
-    }catch{
-      setNotice("Refresh produk gagal. Coba beberapa saat lagi.");
+      const synced=await pushDatabase(nextCatalog,nextResolved);
+      if(!synced) throw new Error("Database sync gagal");
+
+      const local=dbToLocal(synced);
+      setCatalog(local.catalog);
+      setResolved(local.resolved);
+
+      const refreshed=local.resolved[url]||merged;
+      setProductNotice(prev=>({
+        ...prev,
+        [url]:refreshed.images?.length
+          ? `✓ Refresh selesai · ${refreshed.images.length} foto · sudah sync ke Client`
+          : "✓ Refresh selesai · data sudah sync ke Client"
+      }));
+    }catch(error){
+      setProductNotice(prev=>({
+        ...prev,
+        [url]:"Refresh gagal: "+(error instanceof Error?error.message:"coba lagi")
+      }));
     }finally{
-      setBusy(false);
+      setRefreshingUrl(null);
     }
   }
 
@@ -431,9 +468,17 @@ export default function AdminPage(){
                 {meta?.price?<b>{meta.currency==="IDR"?"Rp ":""}{meta.price}</b>:<b>Harga mengikuti Blibli</b>}
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
-                  <button onClick={()=>refreshProduct(url)} disabled={busy}><RefreshCw size={15}/>Refresh Data</button>
-                  <button onClick={()=>removeLink(url)}><Trash2 size={15}/>Hapus</button>
+                  <button
+                    className={refreshingUrl===url?"refresh-btn refreshing":"refresh-btn"}
+                    onClick={()=>refreshProduct(url)}
+                    disabled={refreshingUrl!==null}
+                  >
+                    <RefreshCw size={15}/>
+                    {refreshingUrl===url?"Refreshing...":"Refresh Data"}
+                  </button>
+                  <button onClick={()=>removeLink(url)} disabled={refreshingUrl===url}><Trash2 size={15}/>Hapus</button>
                 </div>
+                {productNotice[url]?<div className={productNotice[url].startsWith("Refresh gagal")?"product-refresh-status error":"product-refresh-status"}>{productNotice[url]}</div>:null}
               </div>
             </article>
           })}
