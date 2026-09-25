@@ -37,7 +37,7 @@ export const products:Product[]=[
   sequence:2,
   id:"ACO-60021-00070-00001",
   canonicalProductId:"ACO-60021-00070-00001",
-  name:"ACMIC FC100 CFC100 Kabel Data Charger USB Type C 100CM Fast Charging Cable Hitam",
+  name:"ACMIC FC100 CFC100 kabel data charger usb type c 100CM fast charging cable hitam",
   brand:"ACMIC",
   category:"Charging & Cable",
   images:[
@@ -49,8 +49,37 @@ export const products:Product[]=[
     "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-3937306/acmic_acmic_fc100_kabel_data_charger_usb_type_c_100cm_fast_charging_cable_-_hitam_full19_grw1dvf1.jpeg",
     "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-3937306/acmic_acmic_fc100_kabel_data_charger_usb_type_c_100cm_fast_charging_cable_-_hitam_full20_vabiy15q.jpeg"
   ],
-  affiliateUrl:"https://www.blibli.com/p/acmic-fc100-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable-hitam/is--ACO-60021-00070-00001",
+  affiliateUrl:"https://s.blibli.com/GNtk/nppiag7f",
   badge:"Blibli Affiliate",
   features:["100 cm","USB Type-C","Fast charging"]
+},
+{
+  sequence:3,
+  id:"XIO-60022-01141-00001",
+  canonicalProductId:"XIO-60022-01141-00001",
+  name:"XIAOMI cable 6A type a to type c",
+  brand:"XIAOMI",
+  category:"Charging & Cable",
+  images:[
+    "https://4phones.eu/cdn/shop/files/90000810874_A.jpg?v=1770447730",
+    "https://xlineparts.com/storage/images/products/1738406224_7799.jpg"
+  ],
+  affiliateUrl:"https://s.blibli.com/GNtk/5qzuieiw",
+  badge:"Blibli Affiliate",
+  features:["USB Type-C","6A","Fast charging"]
+},
+{
+  sequence:4,
+  id:"ACO-60021-00234-00001",
+  canonicalProductId:"ACO-60021-00234-00001",
+  name:"ACMIC PDC100 power delivery pd 100CM cable usb type c to usb type c",
+  brand:"ACMIC",
+  category:"Charging & Cable",
+  images:[
+    "https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"
+  ],
+  affiliateUrl:"https://s.blibli.com/GNtk/gd0wp7zz",
+  badge:"Blibli Affiliate",
+  features:["100 cm","USB Type-C","Power Delivery"]
 }
 ];
