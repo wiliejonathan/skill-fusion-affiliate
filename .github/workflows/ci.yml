@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-client:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -16,7 +16,24 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install
+      - name: Install client
         run: npm install
-      - name: Build
+      - name: Build client
+        run: npm run build
+
+  build-admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install admin
+        run: npm install
+      - name: Build admin
         run: npm run build
