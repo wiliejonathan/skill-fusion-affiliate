@@ -13,7 +13,8 @@ export function useSyncedProducts(){
 
     async function sync(){
       try{
-        const res=await fetch("/api/catalog",{cache:"no-store"});
+        const res=await fetch("/api/catalog?ts="+Date.now(),{cache:"no-store"});
+        if(!res.ok) throw new Error("catalog sync failed");
         const data=await res.json();
         if(!mounted) return;
         if(data?.ok&&Array.isArray(data.products)&&data.products.length){
