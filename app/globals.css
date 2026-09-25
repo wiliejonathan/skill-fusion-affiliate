@@ -765,3 +765,115 @@ button,a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     animation:none!important;
   }
 }
+
+
+/* Hero headline aesthetic refinement */
+.tech-hero h1{
+  display:block;
+}
+.hero-title-line{
+  position:relative;
+  display:inline-block;
+  letter-spacing:.035em;
+  word-spacing:.06em;
+  white-space:nowrap;
+  text-shadow:0 0 0 rgba(66,215,255,0);
+}
+.hero-title-top{
+  margin-bottom:.14em;
+}
+.hero-title-bottom{
+  margin-top:.02em;
+  background:
+    linear-gradient(
+      90deg,
+      #eef9ff 0%,
+      #eef9ff 24%,
+      #8ddfff 40%,
+      #5f83ff 54%,
+      #8ddfff 68%,
+      #eef9ff 84%,
+      #eef9ff 100%
+    );
+  background-size:220% 100%;
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  animation:heroSignalSweep 3.8s cubic-bezier(.45,0,.2,1) infinite;
+  filter:drop-shadow(0 0 0 rgba(66,215,255,0));
+}
+.hero-title-bottom:after{
+  content:"";
+  position:absolute;
+  top:8%;
+  bottom:8%;
+  left:-18%;
+  width:22%;
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,.12),
+    rgba(150,231,255,.58),
+    rgba(255,255,255,.16),
+    transparent
+  );
+  transform:skewX(-14deg);
+  filter:blur(5px);
+  mix-blend-mode:screen;
+  animation:heroFlashSweep 3.8s cubic-bezier(.45,0,.2,1) infinite;
+  pointer-events:none;
+}
+@keyframes heroSignalSweep{
+  0%,12%{
+    background-position:100% 50%;
+    filter:drop-shadow(0 0 0 rgba(66,215,255,0));
+  }
+  38%{
+    filter:drop-shadow(0 0 8px rgba(66,215,255,.14));
+  }
+  55%{
+    background-position:0% 50%;
+    filter:drop-shadow(0 0 13px rgba(66,215,255,.28));
+  }
+  72%,100%{
+    background-position:0% 50%;
+    filter:drop-shadow(0 0 0 rgba(66,215,255,0));
+  }
+}
+@keyframes heroFlashSweep{
+  0%,16%{left:-24%;opacity:0}
+  24%{opacity:.15}
+  49%{opacity:.9}
+  63%{left:108%;opacity:.18}
+  70%,100%{left:108%;opacity:0}
+}
+
+@media(min-width:900px){
+  .tech-hero h1{
+    line-height:.98;
+  }
+  .hero-title-top,
+  .hero-title-bottom{
+    letter-spacing:.045em;
+  }
+}
+
+@media(max-width:599px){
+  .tech-hero h1{
+    line-height:1.02;
+  }
+  .hero-title-line{
+    letter-spacing:.025em;
+    word-spacing:.04em;
+  }
+  .hero-title-top{
+    margin-bottom:.18em;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .hero-title-bottom,
+  .hero-title-bottom:after{
+    animation:none!important;
+  }
+}
