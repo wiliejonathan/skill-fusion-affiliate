@@ -102,23 +102,6 @@ export default function Marketplace(){
           <div className="core-node node-b"><Zap size={18}/></div>
           <div className="core-node node-c"><Sparkles size={18}/></div>
         </div>
-
-        <div className="hero-data-row">
-          <div><small>ACTIVE CATALOG</small><strong>{String(products.length).padStart(2,"0")}</strong><span>PRODUCT</span></div>
-          <div><small>MEDIA SET</small><strong>{String(products[0]?.images.length||0).padStart(2,"0")}</strong><span>IMAGES</span></div>
-          <div><small>MARKET ROUTE</small><strong>ID</strong><span>BLIBLI</span></div>
-          <div><small>SOURCE MODE</small><strong>01</strong><span>ADMIN CURATED</span></div>
-        </div>
-      </section>
-
-      <section className="protocol-strip">
-        <div><span>01</span><strong>CURATE</strong><small>produk dipilih dari Admin</small></div>
-        <i/>
-        <div><span>02</span><strong>VERIFY ID</strong><small>dedup via canonical ID</small></div>
-        <i/>
-        <div><span>03</span><strong>MEDIA</strong><small>gallery dari DOM produk</small></div>
-        <i/>
-        <div><span>04</span><strong>ROUTE</strong><small>affiliate link dipertahankan</small></div>
       </section>
 
       <div className="mobile-search tech-search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari produk teknologi..."/></div>
