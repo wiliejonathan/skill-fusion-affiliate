@@ -15,6 +15,16 @@ const OFFICIAL_FALLBACK_PAGES:Record<string,string>={
 };
 
 const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
+  "ACO-60021-00122-00005":[
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full02_r5kwu2kd.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full03_lksk36kw.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full01_qypmsyee.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full04_pyp47xtt.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full05_d1dlpkjc.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full06_mpxrk7fj.jpg",
+    "https://acmic.id/cdn/shop/files/FLEXYLINE_GambarUtamaCFC_1080x.jpg?v=1698295560",
+    "https://acmic.id/cdn/shop/files/CABLE_FLEXYLINE_7b17bc56-50db-4378-9bd0-c004ca8d6e89_1080x.jpg?v=1698295560"
+  ],
   "XIO-60022-01141-00001":[
     "https://4phones.eu/cdn/shop/files/90000810874_A.jpg?v=1770447730",
     "https://xlineparts.com/storage/images/products/1738406224_7799.jpg"
@@ -370,7 +380,7 @@ export async function GET(req:NextRequest){
         images=seoGallery;
       }
 
-      if(!images.length && productId && KNOWN_IMAGE_GALLERIES[productId]){
+      if(productId && KNOWN_IMAGE_GALLERIES[productId]?.length>images.length){
         images=KNOWN_IMAGE_GALLERIES[productId];
       }
       if(!images.length){
