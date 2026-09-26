@@ -4,6 +4,7 @@ import {useMemo,useState} from "react";
 import {useRouter} from "next/navigation";
 import {Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2} from "lucide-react";
 import type {Product} from "@/lib/products";
+import {requestAppsScript} from "@/shared/apps-script";
 
 type Props={product:Product;wished:boolean;onWishlist:(id:string)=>void};
 
@@ -13,18 +14,19 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   const [navigating,setNavigating]=useState(false);
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const [wishlistFeedback,setWishlistFeedback]=useState<"idle"|"saved"|"removed">("idle");
+  const [cardPrice,setCardPrice]=useState({price:p.price||null,currency:p.currency||null});
   const images=p.images||[];
   const count=images.length;
   const detailUrl=`/product?id=${encodeURIComponent(p.id)}`;
 
   const formattedPrice=useMemo(()=>{
-    const raw=String(p.price||"").trim();
+    const raw=String(cardPrice.price||"").trim();
     if(!raw) return null;
 
     const numeric=Number(raw.replace(/[^0-9]/g,""));
     if(!Number.isFinite(numeric)||numeric<=0) return null;
 
-    if((p.currency||"IDR").toUpperCase()==="IDR"){
+    if((cardPrice.currency||"IDR").toUpperCase()==="IDR"){
       return new Intl.NumberFormat("id-ID",{
         style:"currency",
         currency:"IDR",
@@ -32,12 +34,27 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
       }).format(numeric);
     }
 
-    return `${p.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
-  },[p.price,p.currency]);
+    return `${cardPrice.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
+  },[cardPrice.price,cardPrice.currency]);
+
+  async function contributeLivePrice(){
+    try{
+      const data=await requestAppsScript("price",{id:p.id});
+      if(data?.price){
+        setCardPrice({
+          price:data.price,
+          currency:data.currency||p.currency||"IDR"
+        });
+      }
+    }catch{
+      // Navigation must never be blocked by a live-price refresh failure.
+    }
+  }
 
   function openDetail(){
     if(navigating) return;
     setNavigating(true);
+    void contributeLivePrice();
     window.setTimeout(()=>router.push(detailUrl),300);
   }
 
@@ -140,7 +157,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
           <span className="live-note">Harga & stok mengikuti halaman merchant.</span>
         </div>
         <div className="card-detail-hint">OPEN PRODUCT INTELLIGENCE →</div>
-        <a className="cta-btn" href={p.affiliateUrl} target="_blank" rel="sponsored noreferrer" onClick={stop}>Buka di Blibli <ExternalLink size={15}/></a>
+        <a className="cta-btn" href={p.affiliateUrl} target="_blank" rel="sponsored noreferrer" onClick={e=>{stop(e);void contributeLivePrice();}}>Buka di Blibli <ExternalLink size={15}/></a>
       </div>
     </article>
 
