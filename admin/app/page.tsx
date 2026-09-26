@@ -539,14 +539,20 @@ export default function AdminPage(){
 
     setBusy(true);
     setNotice("");
-    const next={...resolved};
-    const newItems:CatalogIdentity[]=[];
+
+    let nextCatalog=[...catalog];
+    let nextResolved={...resolved};
+    let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
+    let imported=0;
+    let resolvedDuplicates=0;
     let failedImports=0;
     const failedMessages:string[]=[];
-    let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
 
-    for(const item of ready){
+    for(let index=0;index<ready.length;index++){
+      const item=ready[index];
       try{
+        setNotice(`Import ${index+1}/${ready.length} · resolve shortlink Blibli...`);
+
         let data:ResolvedProduct|null=null;
         let primaryError="";
 
@@ -559,8 +565,6 @@ export default function AdminPage(){
           primaryError=error instanceof Error?error.message:"Backend tidak dapat membaca link Blibli.";
         }
 
-        // Compatibility fallback for stale Apps Script deployments that still
-        // reject imports when Blibli returns Product ID but no gallery metadata.
         if(!data){
           data=await resolveBlibliShortlinkFallback(item.inputUrl);
         }
@@ -569,54 +573,130 @@ export default function AdminPage(){
           throw new Error(primaryError||"Shortlink Blibli belum berhasil di-resolve.");
         }
 
-        next[item.inputUrl]=data;
-        newItems.push({
+        const productId=data.canonicalProductId.toUpperCase();
+        const canonicalKey=String(data.canonicalUrl||"").replace(/\/$/,"").toLowerCase();
+
+        // Shortlinks do not expose Product ID during pre-flight. Re-check after
+        // resolution so a second affiliate shortlink cannot create/overwrite the
+        // same product under a new sequence number.
+        const duplicate=nextCatalog.find(existing=>
+          String(existing.canonicalProductId||"").toUpperCase()===productId ||
+          (!!canonicalKey&&String(existing.canonicalUrl||"").replace(/\/$/,"").toLowerCase()===canonicalKey)
+        );
+        if(duplicate){
+          resolvedDuplicates++;
+          continue;
+        }
+
+        // Known exact galleries are applied immediately, but we still run the
+        // automatic DOM reload below. This also prevents a sparse resolver from
+        // temporarily publishing an empty product.
+        const knownImages=KNOWN_BLIBLI_GALLERIES[productId]||[];
+        const resolvedImages=sanitizeBlibliGallery(
+          data.images?.length?data.images:(data.image?[data.image]:[])
+        );
+        if(knownImages.length>resolvedImages.length){
+          data={...data,image:knownImages[0]||null,images:knownImages.slice()};
+        }else{
+          data={...data,image:resolvedImages[0]||data.image||null,images:resolvedImages};
+        }
+
+        const newItem:CatalogIdentity={
           sequence:nextSequence++,
           affiliateUrl:item.inputUrl,
           canonicalProductId:data.canonicalProductId,
           canonicalUrl:data.canonicalUrl
-        });
-      }catch(error){
-        failedImports++;
-        failedMessages.push(error instanceof Error?error.message:"Backend tidak dapat membaca link Blibli.");
-      }
-    }
+        };
 
-    if(!newItems.length){
-      const detail=failedMessages[0]||"Metadata atau koneksi backend belum siap.";
-      setNotice("Import gagal [Resolver v4]: "+detail+" Tidak ada produk yang disimpan.");
-      setBusy(false);
-      return;
-    }
-    const merged=[...catalog,...newItems];
-    setResolved(next);
-    setCatalog(merged);
-    setText("");
+        let candidateCatalog=[...nextCatalog,newItem];
+        let candidateResolved={...nextResolved,[item.inputUrl]:data};
 
-    try{
-      const newUrls=new Set(newItems.map(item=>item.affiliateUrl).filter((x):x is string=>Boolean(x)));
-      const products=buildDbProducts(merged,next).filter(product=>newUrls.has(product.affiliateUrl));
+        // Save a Draft identity first because reloadDom works against Draft.
+        // Import is not considered successful yet and will be rolled back if no
+        // usable product gallery can be obtained.
+        const initialProduct=buildDbProducts(candidateCatalog,candidateResolved)
+          .find(product=>product.affiliateUrl===item.inputUrl);
+        if(!initialProduct) throw new Error("Data produk hasil resolve belum lengkap.");
 
-      if(products.length){
-        const res=await fetch("/api/catalog",{
+        let saveRes=await fetch("/api/catalog",{
           method:"POST",
           headers:{"content-type":"application/json"},
-          body:JSON.stringify({products})
+          body:JSON.stringify({product:initialProduct})
         });
-        const data=await res.json();
-        if(!res.ok||!data?.ok) throw new Error(data?.message||"Database sync gagal");
-        setServerReady(true);
-      }
+        let saveData=await saveRes.json();
+        if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Database sync awal gagal.");
 
-      setDirtyUrls(prev=>prev.filter(url=>!newItems.some(item=>item.affiliateUrl===url)));
-      setNotice(`${newItems.length} produk baru berhasil di-import dan langsung disinkronkan ke Client.${failedImports?` ${failedImports} link gagal dibaca.`:""}`);
-    }catch{
-      const failedUrls=newItems.map(item=>item.affiliateUrl).filter((x):x is string=>Boolean(x));
-      setDirtyUrls(prev=>[...new Set([...prev,...failedUrls])]);
-      setNotice(`${newItems.length} produk masuk lokal, tetapi sinkron database gagal. Coba Refresh Data.`);
-    }finally{
-      setBusy(false);
+        // AUTO RELOAD DOM: every successful import automatically performs the
+        // same reload operation as the manual button before we call it finished.
+        setNotice(`Import ${index+1}/${ready.length} · Auto Reload DOM sedang membaca semua foto produk...`);
+        const source=validBlibliSource(data.canonicalUrl,data.finalUrl,item.inputUrl);
+        if(source){
+          try{
+            const reloadRes=await fetch(
+              "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now()+"-"+index,
+              {cache:"no-store"}
+            );
+            const reloadData:ResolvedProduct=await reloadRes.json();
+            if(reloadRes.ok&&reloadData?.ok){
+              const merged=mergeReloadedProduct(item.inputUrl,reloadData,candidateCatalog,candidateResolved);
+              candidateCatalog=merged.catalog;
+              candidateResolved=merged.resolved;
+            }
+          }catch{
+            // Final image validation below decides whether the import may remain.
+          }
+        }
+
+        const finalProduct=buildDbProducts(candidateCatalog,candidateResolved)
+          .find(product=>product.affiliateUrl===item.inputUrl);
+
+        if(!finalProduct||!finalProduct.images.length){
+          // Never leave an image-less import in Draft/Published.
+          try{
+            await fetch("/api/catalog?id="+encodeURIComponent(productId),{method:"DELETE"});
+          }catch{}
+          throw new Error("Foto produk belum berhasil dibaca otomatis. Import dibatalkan agar katalog tidak menyimpan produk tanpa gambar.");
+        }
+
+        // Publish the fully reloaded gallery immediately. No separate manual
+        // Reload DOM / Refresh Data step is required after import.
+        saveRes=await fetch("/api/catalog",{
+          method:"POST",
+          headers:{"content-type":"application/json"},
+          body:JSON.stringify({product:finalProduct})
+        });
+        saveData=await saveRes.json();
+        if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Sinkron gallery ke Client gagal.");
+
+        nextCatalog=candidateCatalog;
+        nextResolved=candidateResolved;
+        imported++;
+      }catch(error){
+        failedImports++;
+        failedMessages.push(error instanceof Error?error.message:"Import gagal.");
+      }
     }
+
+    setCatalog(nextCatalog);
+    setResolved(nextResolved);
+    setText("");
+    setDirtyUrls(prev=>prev.filter(url=>!nextCatalog.some(item=>item.affiliateUrl===url)));
+    setServerReady(true);
+
+    if(imported){
+      setNotice(
+        `✓ ${imported} produk berhasil di-import · Auto Reload DOM selesai · foto langsung tersedia di Admin dan Client.`+
+        (resolvedDuplicates?` ${resolvedDuplicates} duplicate Product ID diblokir.`:"")+
+        (failedImports?` ${failedImports} link gagal.`:"")
+      );
+    }else if(resolvedDuplicates){
+      setNotice(`Tidak ada produk baru. ${resolvedDuplicates} link ternyata mengarah ke Product ID yang sudah ada, jadi duplicate otomatis diblokir.`);
+    }else{
+      const detail=failedMessages[0]||"Metadata atau gallery Blibli belum dapat dibaca.";
+      setNotice("Import gagal [Auto DOM]: "+detail);
+    }
+
+    setBusy(false);
   }
 
   async function pushSingleProduct(url:string,nextCatalog:CatalogIdentity[]=catalog,nextResolved:Record<string,ResolvedProduct>=resolved){
