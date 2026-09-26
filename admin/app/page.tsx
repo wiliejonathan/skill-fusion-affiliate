@@ -379,6 +379,7 @@ export default function AdminPage(){
     const next={...resolved};
     const newItems:CatalogIdentity[]=[];
     let failedImports=0;
+    const failedMessages:string[]=[];
     let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
 
     for(const item of ready){
@@ -393,14 +394,15 @@ export default function AdminPage(){
           canonicalProductId:data.canonicalProductId,
           canonicalUrl:data.canonicalUrl
         });
-      }catch{
+      }catch(error){
         failedImports++;
-        // Failed metadata is not a product and must not be reported as published.
+        failedMessages.push(error instanceof Error?error.message:"Backend tidak dapat membaca link Blibli.");
       }
     }
 
     if(!newItems.length){
-      setNotice("Import gagal: metadata atau koneksi backend belum siap. Tidak ada produk yang disimpan.");
+      const detail=failedMessages[0]||"Metadata atau koneksi backend belum siap.";
+      setNotice("Import gagal: "+detail+" Tidak ada produk yang disimpan.");
       setBusy(false);
       return;
     }
