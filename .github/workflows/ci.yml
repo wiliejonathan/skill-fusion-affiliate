@@ -16,6 +16,13 @@ jobs:
         run: |
           python -m json.tool site/data/products.json >/dev/null
           python -m json.tool apps-script/appsscript.json >/dev/null
+      - name: JavaScript syntax check
+        run: |
+          node --check site/config.js
+          node --check site/app.js
+          node --check site/admin.js
+          cp apps-script/Code.gs /tmp/Code.js
+          node --check /tmp/Code.js
       - name: Check required files
         run: |
           test -f site/index.html
