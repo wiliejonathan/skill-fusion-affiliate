@@ -147,9 +147,12 @@ function collectBlibliGalleryImages(value:any,productCode:string|null){
   const found:string[]=[];
   const assetCode=productCode&&/^MTA-\d+$/i.test(productCode)?productCode:null;
 
-  function visit(node:any,keyHint:string){
+  function visit(node:any){
     if(typeof node==="string"){
-      if(!/(image|gallery|media|photo|picture)/i.test(keyHint)) return;
+      // Product-summary payloads are not consistent about field names. Instead
+      // of trusting keys such as "images", collect every Blibli catalog image
+      // URL from the product response and let the MTA asset grouping below
+      // isolate the coherent gallery.
       const src=normalizeCatalogImageUrl(node);
       if(!isBlibliCatalogImage(src)) return;
       if(assetCode&&!src.toUpperCase().includes(assetCode.toUpperCase())) return;
@@ -158,20 +161,16 @@ function collectBlibliGalleryImages(value:any,productCode:string|null){
     }
 
     if(Array.isArray(node)){
-      for(const item of node) visit(item,keyHint);
+      for(const item of node) visit(item);
       return;
     }
 
     if(!node||typeof node!=="object") return;
-
-    for(const [key,child] of Object.entries(node)){
-      const nextHint=/(image|gallery|media|photo|picture)/i.test(key)?key:keyHint;
-      visit(child,nextHint);
-    }
+    for(const child of Object.values(node)) visit(child);
   }
 
-  visit(value,"");
-  return found.slice(0,30);
+  visit(value);
+  return found.slice(0,60);
 }
 
 function imageFromSummaryItem(item:any){
