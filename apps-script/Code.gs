@@ -81,8 +81,33 @@ function validBlibliUrl_(url){
 function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null}}
 function resolveProduct_(url){
   validBlibliUrl_(url);
-  const p=reloadFromBlibli_({id:'',name:'',images:[],affiliateUrl:url,canonicalUrl:''});
-  if(!p.id||!p.name||!p.images.length)throw new Error('Metadata Blibli belum terbaca. Produk belum disimpan.');
+
+  // Resolve identity first. Import must not fail merely because Blibli omits
+  // gallery metadata from the server-side response.
+  const resolved=resolveUrl_(url);
+  const canonical=canonicalProductUrl_(resolved.canonical||resolved.finalUrl||url);
+  const id=productId_(canonical)||productId_(resolved.finalUrl||'');
+
+  if(!id)throw new Error('Shortlink Blibli belum berhasil di-resolve ke Product ID. Coba lagi beberapa detik.');
+
+  const seed={
+    id:id,
+    canonicalProductId:id,
+    name:titleFromUrl_(canonical),
+    images:[],
+    affiliateUrl:url,
+    canonicalUrl:canonical,
+    badge:'Blibli Affiliate',
+    features:[],
+    price:'',
+    currency:''
+  };
+
+  const p=reloadFromBlibli_(seed);
+  if(!isUsableProductTitle_(p.name))p.name=titleFromUrl_(canonical);
+
+  // Product ID + canonical URL are enough to import. Gallery can be completed by
+  // the same reload pipeline after import instead of blocking the whole product.
   return resolvedShape_(p,url);
 }
 function reloadDom_(url){
@@ -226,16 +251,77 @@ function reloadFromBlibli_(p){
 }
 function resolveUrl_(url){
   let current=url,html='';
-  for(let i=0;i<6;i++){
+
+  for(let i=0;i<8;i++){
     validBlibliUrl_(current);
-    const r=UrlFetchApp.fetch(current,{followRedirects:false,muteHttpExceptions:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}});
-    const code=r.getResponseCode(),h=r.getAllHeaders(),loc=h.Location||h.location;
-    if(code>=300&&code<400&&loc){current=absoluteUrl_(current,String(loc));continue}
-    html=r.getContentText();
+    let response=null;
+
+    for(let u=0;u<PRODUCT_FETCH_UAS.length;u++){
+      try{
+        const candidate=UrlFetchApp.fetch(current,{
+          followRedirects:false,
+          muteHttpExceptions:true,
+          headers:{
+            Accept:'text/html,application/xhtml+xml',
+            'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+            'Cache-Control':'no-cache',
+            Pragma:'no-cache',
+            'User-Agent':PRODUCT_FETCH_UAS[u]
+          }
+        });
+        const candidateCode=candidate.getResponseCode();
+        if(candidateCode>=200&&candidateCode<400){
+          response=candidate;
+          break;
+        }
+      }catch(e){}
+    }
+
+    if(!response)break;
+
+    const code=response.getResponseCode(),h=response.getAllHeaders(),loc=h.Location||h.location;
+    if(code>=300&&code<400&&loc){
+      const next=absoluteUrl_(current,String(loc));
+      // Blibli shortlinks normally land on www.blibli.com. If an intermediate
+      // redirect is external, let fetchText_ follow it and recover canonical URL.
+      if(/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(next)){
+        current=next;
+        continue;
+      }
+      break;
+    }
+
+    html=response.getContentText();
     break;
   }
-  const c=pick_(html,[/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i]);
-  return {finalUrl:current,canonical:c||current};
+
+  let canonical=pick_(html,[
+    /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
+    /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i
+  ]);
+
+  // Fallback: fetch with redirects enabled. This recovers the final product page
+  // even when s.blibli.com changes its redirect chain.
+  if(!productId_(canonical||'')&&!productId_(current)){
+    const followed=fetchText_(url);
+    const followedCanonical=pick_(followed,[
+      /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
+      /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i
+    ]);
+    if(followedCanonical){
+      canonical=followedCanonical;
+      current=followedCanonical;
+    }else{
+      const embedded=String(followed||'').match(/https:\/\/(?:www\.)?blibli\.com\/p\/[^"'\\\s<>]+\/is--[A-Za-z0-9-]+/i);
+      if(embedded&&embedded[0]){
+        canonical=embedded[0];
+        current=embedded[0];
+      }
+    }
+  }
+
+  const candidate=productId_(canonical||'')?canonical:current;
+  return {finalUrl:current,canonical:canonicalProductUrl_(candidate||url)};
 }
 function absoluteUrl_(base,loc){
   if(/^https?:\/\//i.test(loc))return loc;
@@ -471,6 +557,29 @@ function officialFallbackImages_(id){
   return rankProductImages_(out,id).slice(0,20);
 }
 
+function canonicalProductUrl_(value){
+  try{
+    const u=new URL(String(value||''));
+    return (u.origin+u.pathname).replace(/\/$/,'');
+  }catch(e){
+    return String(value||'').split('?')[0].replace(/\/$/,'');
+  }
+}
+function titleFromUrl_(value){
+  try{
+    const u=new URL(String(value||''));
+    const marker='/is--';
+    const i=u.pathname.indexOf(marker);
+    const before=i>=0?u.pathname.slice(0,i):u.pathname;
+    const slug=before.split('/').filter(Boolean).pop()||'Produk Blibli';
+    return slug.split('-').filter(Boolean).map(function(part,index){
+      if(/^\d/.test(part)||/^[a-z]+\d+$/i.test(part))return part.toUpperCase();
+      return index===0?part.toUpperCase():part;
+    }).join(' ');
+  }catch(e){
+    return 'Produk Blibli';
+  }
+}
 function productId_(url){const m=String(url||'').match(/\/is--([^/?#]+)/i);return m?m[1]:''}
 function pick_(text,patterns){for(let i=0;i<patterns.length;i++){const m=String(text||'').match(patterns[i]);if(m&&m[1])return String(m[1]).replace(/&amp;/g,'&').trim()}return ''}
 function unique_(arr){return Array.from(new Set((arr||[]).filter(Boolean)))}
