@@ -196,8 +196,9 @@ function sheet_(name){const s=ss_().getSheetByName(name);if(!s)throw new Error('
 function ensureSchema_(){
   [DRAFT_SHEET,PUBLISHED_SHEET].forEach(function(name){
     const s=sheet_(name);
-    if(s.getMaxColumns()<HEADERS.length){
-      s.insertColumnsAfter(s.getMaxColumns(),HEADERS.length-s.getMaxColumns());
+    if(typeof s.getMaxColumns==='function'&&typeof s.insertColumnsAfter==='function'){
+      const max=s.getMaxColumns();
+      if(max<HEADERS.length)s.insertColumnsAfter(max,HEADERS.length-max);
     }
     const current=s.getRange(1,1,1,HEADERS.length).getValues()[0];
     let different=false;
