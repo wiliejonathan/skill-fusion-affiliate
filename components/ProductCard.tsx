@@ -54,7 +54,6 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   function openDetail(){
     if(navigating) return;
     setNavigating(true);
-    void contributeLivePrice();
     window.setTimeout(()=>router.push(detailUrl),300);
   }
 
