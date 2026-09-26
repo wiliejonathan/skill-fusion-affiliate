@@ -1,8 +1,24 @@
 {
-  "name":"skill-fusion-affiliate",
-  "version":"0.1.0",
-  "private":true,
-  "scripts":{"dev":"next dev","build":"next build","start":"next start"},
-  "dependencies":{"next":"latest","react":"latest","react-dom":"latest","lucide-react":"latest"},
-  "devDependencies":{"@types/node":"latest","@types/react":"latest","@types/react-dom":"latest","typescript":"latest"}
+  "name": "skill-fusion-affiliate",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "build:pages": "node scripts/build-pages.mjs",
+    "test:backend": "node --test tests/backend.test.cjs"
+  },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "lucide-react": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  }
 }

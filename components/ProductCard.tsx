@@ -15,7 +15,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   const [wishlistFeedback,setWishlistFeedback]=useState<"idle"|"saved"|"removed">("idle");
   const images=p.images||[];
   const count=images.length;
-  const detailUrl=`/product/${encodeURIComponent(p.id)}`;
+  const detailUrl=`/product?id=${encodeURIComponent(p.id)}`;
 
   function openDetail(){
     if(navigating) return;
@@ -27,7 +27,7 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
 
   async function shareProduct(e:React.MouseEvent){
     stop(e);
-    const url=window.location.origin+detailUrl;
+    const url=window.location.origin+(process.env.NEXT_PUBLIC_BASE_PATH||"/skill-fusion-affiliate")+detailUrl;
     const data={title:p.name,text:`Lihat ${p.name} di Skill Fusion`,url};
 
     try{

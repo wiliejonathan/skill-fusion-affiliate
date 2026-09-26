@@ -1,38 +1,18 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 jobs:
-  validate-static-stack:
+  validate-pages-backend:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Validate JSON
-        run: |
-          python -m json.tool site/data/products.json >/dev/null
-          python -m json.tool apps-script/appsscript.json >/dev/null
-      - name: JavaScript syntax check
-        run: |
-          node --check site/config.js
-          node --check site/app.js
-          node --check site/admin.js
-          cp apps-script/Code.gs /tmp/Code.js
-          node --check /tmp/Code.js
-      - name: Check required files
-        run: |
-          test -f site/index.html
-          test -f site/admin.html
-          test -f site/app.js
-          test -f site/admin.js
-          test -f site/config.js
-          test -f site/styles.css
-          test -f apps-script/Code.gs
-      - name: Confirm deprecated paid backend is not required by static site
-        run: |
-          ! grep -R "skill-fusion-admin.vercel.app" site apps-script || (echo "Vercel dependency found" && exit 1)
-          ! grep -R "@neondatabase" site apps-script || (echo "Neon dependency found" && exit 1)
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:backend
+      - run: npm run build:pages

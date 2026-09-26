@@ -5,27 +5,93 @@ const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
 const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source'];
 
+// Public reads only. Admin credentials and mutations are accepted exclusively in POST bodies.
 function doGet(e){
   const p=(e&&e.parameter)||{};
   let out;
   try{
     const action=String(p.action||'catalog');
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:2,time:new Date().toISOString()};
     else if(action==='catalog') out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
-    else{
-      requireAdmin_(p.key);
-      if(action==='draft') out={ok:true,products:readProducts_(DRAFT_SHEET)};
-      else if(action==='reload') out=reloadOne_(String(p.id||''));
-      else if(action==='reloadAll') out=reloadAll_();
-      else if(action==='publish') out=publishOne_(String(p.id||''));
-      else if(action==='publishAll') out=publishAll_();
-      else if(action==='delete') out=deleteOne_(String(p.id||''));
-      else throw new Error('Action tidak dikenal: '+action);
-    }
-  }catch(err){
-    out={ok:false,message:String(err&&err.message||err)};
-  }
+    else throw new Error('Operasi Admin wajib menggunakan POST');
+  }catch(err){out={ok:false,message:String(err.message||err)}}
   return output_(out,p.callback);
+}
+
+function doPost(e){
+  let lock;
+  try{
+    const p=JSON.parse(e&&e.postData&&e.postData.contents||'{}');
+    requireAdmin_(p.key);
+    const action=String(p.action||'');
+    if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
+    if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
+    if(['savePublish','reloadDom','reload','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
+    lock=LockService.getScriptLock();
+    if(!lock.tryLock(30000))throw new Error('Database sedang diproses. Coba lagi.');
+    let out;
+    if(action==='savePublish')out=savePublish_(p);
+    else if(action==='reloadDom')out=reloadDom_(String(p.url||''));
+    else if(action==='reload')out=reloadOne_(String(p.id||''));
+    else if(action==='publish')out=publishOne_(String(p.id||''));
+    else if(action==='publishAll')out=publishAll_();
+    else out=deleteOne_(String(p.id||''));
+    SpreadsheetApp.flush();
+    return output_(out);
+  }catch(err){return output_({ok:false,code:err.code||'ERROR',message:String(err.message||err)})}
+  finally{if(lock&&lock.hasLock())lock.releaseLock()}
+}
+
+function validBlibliUrl_(url){
+  const value=String(url||'');
+  if(!/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value))throw new Error('URL harus HTTPS Blibli');
+  return value;
+}
+function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null}}
+function resolveProduct_(url){
+  validBlibliUrl_(url);
+  const p=reloadFromBlibli_({id:'',name:'',images:[],affiliateUrl:url,canonicalUrl:''});
+  if(!p.id||!p.name||!p.images.length)throw new Error('Metadata Blibli belum terbaca. Produk belum disimpan.');
+  return resolvedShape_(p,url);
+}
+function reloadDom_(url){
+  validBlibliUrl_(url);
+  const id=productId_(url);
+  const current=readProducts_(DRAFT_SHEET).find(p=>p.id===id||p.affiliateUrl===url||p.canonicalUrl===url);
+  if(!current)throw new Error('Produk tidak ditemukan di Draft');
+  const next=reloadFromBlibli_(current);
+  if(next.id!==current.id)throw new Error('Product ID berubah; data lama dipertahankan');
+  upsert_(DRAFT_SHEET,next);
+  log_('RELOAD',next.id,'OK',next.images.length+' foto');
+  return resolvedShape_(next,url);
+}
+function validateProduct_(p){
+  if(!p||typeof p!=='object'||!p.id||!String(p.name||'').trim())throw new Error('Data produk belum lengkap');
+  const id=String(p.id);
+  if(!/^[A-Za-z0-9-]{3,100}$/.test(id))throw new Error('Product ID tidak valid');
+  validBlibliUrl_(p.affiliateUrl);
+  if(p.canonicalUrl){validBlibliUrl_(p.canonicalUrl);if(productId_(p.canonicalUrl)!==id)throw new Error('Product ID tidak cocok dengan URL')}
+  if(!Array.isArray(p.images)||p.images.some(x=>typeof x!=='string'||!/^https:\/\//i.test(x)))throw new Error('Foto produk tidak valid');
+  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim()});
+}
+function savePublish_(request){
+  const input=request.product?[request.product]:request.products;
+  if(!Array.isArray(input)||!input.length||input.length>500)throw new Error('Daftar produk kosong atau terlalu besar');
+  // Validate the entire batch before writing; an invalid row must not partially publish.
+  const all=input.map(validateProduct_);
+  const existing=readProducts_(DRAFT_SHEET);
+  const ids=new Set(),urls=new Set();
+  let sequence=Math.max(0,...existing.map(p=>p.sequence));
+  all.forEach(p=>{
+    if(ids.has(p.id)||urls.has(p.affiliateUrl))throw new Error('Produk duplikat dalam batch');
+    ids.add(p.id);urls.add(p.affiliateUrl);
+    if(existing.some(x=>x.affiliateUrl===p.affiliateUrl&&x.id!==p.id))throw new Error('Link affiliate sudah dipakai produk lain');
+    const current=existing.find(x=>x.id===p.id);
+    p.sequence=current?current.sequence:++sequence;
+  });
+  all.forEach(p=>{upsert_(DRAFT_SHEET,p);upsert_(PUBLISHED_SHEET,p)});
+  log_('SAVE_PUBLISH','BATCH','OK',all.length+' produk');
+  return {ok:true,products:readProducts_(DRAFT_SHEET),count:all.length};
 }
 
 function output_(obj,callback){
@@ -44,7 +110,7 @@ function config_(){
   for(let i=1;i<values.length;i++){if(values[i][0])map[String(values[i][0])]=String(values[i][1]||'')}
   return map;
 }
-function requireAdmin_(key){const expected=config_().ADMIN_KEY;if(!expected||String(key||'')!==expected)throw new Error('Admin key salah')}
+function requireAdmin_(key){const expected=config_().ADMIN_KEY;if(!expected||String(key||'')!==expected){const e=new Error('Admin key salah');e.code='UNAUTHORIZED';throw e}}
 function log_(action,id,status,message){sheet_(LOG_SHEET).appendRow([new Date(),action,id||'',status,message||''])}
 
 function rowToProduct_(r){
@@ -53,9 +119,10 @@ function rowToProduct_(r){
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
   return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||'')};
 }
-function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script']}
+function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script'].map(safeCell_)}
 function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
-function findRow_(name,id){const s=sheet_(name),v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
+function findRow_(name,id){const s=sheet_(name);if(s.getLastRow()<2)return -1;const v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
 function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
 function deleteFrom_(name,id){const s=sheet_(name),row=findRow_(name,id);if(row>0)s.deleteRow(row)}
 
@@ -85,13 +152,15 @@ function publishAll_(){
   log_('PUBLISH_ALL','ALL','OK',draft.length+' produk');
   return {ok:true,count:draft.length,message:'Refresh Data All selesai · '+draft.length+' produk Published'};
 }
-function deleteOne_(id){deleteFrom_(DRAFT_SHEET,id);deleteFrom_(PUBLISHED_SHEET,id);log_('DELETE',id,'OK','Dihapus dari Draft & Published');return {ok:true,message:'Produk dihapus'}}
+function deleteOne_(id){if(!id)throw new Error('Product ID wajib diisi');deleteFrom_(DRAFT_SHEET,id);deleteFrom_(PUBLISHED_SHEET,id);log_('DELETE',id,'OK','Dihapus dari Draft & Published');return {ok:true,message:'Produk dihapus'}}
 
 function reloadFromBlibli_(p){
-  const start=p.canonicalUrl||p.affiliateUrl;
+  const start=validBlibliUrl_(p.canonicalUrl||p.affiliateUrl);
   const resolved=resolveUrl_(start);
   const canonical=(resolved.canonical||resolved.finalUrl||start).split('?')[0].replace(/\/$/,'');
+  validBlibliUrl_(canonical);
   const id=productId_(canonical)||p.id;
+  if(p.id&&id!==p.id)throw new Error('Product ID berubah; data lama dipertahankan');
   const html=fetchText_(canonical);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
   const htmlImages=extractBlibliImages_(html);
@@ -111,6 +180,7 @@ function reloadFromBlibli_(p){
 function resolveUrl_(url){
   let current=url,html='';
   for(let i=0;i<6;i++){
+    validBlibliUrl_(current);
     const r=UrlFetchApp.fetch(current,{followRedirects:false,muteHttpExceptions:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}});
     const code=r.getResponseCode(),h=r.getAllHeaders(),loc=h.Location||h.location;
     if(code>=300&&code<400&&loc){current=absoluteUrl_(current,String(loc));continue}
