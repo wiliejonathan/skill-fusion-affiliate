@@ -46,16 +46,34 @@ const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
 function normalizeHtmlForImages(html:string){
   return html
     .replace(/\\u002F/gi,"/")
+    .replace(/\\u003A/gi,":")
     .replace(/\\u0026/gi,"&")
     .replace(/\\\//g,"/")
     .replace(/&amp;/g,"&")
     .replace(/&quot;/g,'"');
 }
 
+function normalizeCatalogImageUrl(src:string){
+  let value=normalizeHtmlForImages(src.trim());
+  if(value.startsWith("//")) value="https:"+value;
+  if(value.startsWith("www.static-src.com/")) value="https://"+value;
+  value=value.replace(/^http:\/\//i,"https://");
+  value=value.replace(/\/images\/catalog\/thumbnail\//i,"/images/catalog/full/");
+  return value;
+}
+
+function isBlibliCatalogImage(src:string){
+  return /^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/full\//i.test(src);
+}
+
 function extractStaticImages(html:string){
   const normalized=normalizeHtmlForImages(html);
-  const matches=normalized.match(/https:\/\/www\.static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/gi)||[];
-  return [...new Set(matches)].slice(0,40);
+  const matches=normalized.match(/(?:https?:)?\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/gi)||[];
+  return [...new Set(
+    matches
+      .map(normalizeCatalogImageUrl)
+      .filter(isBlibliCatalogImage)
+  )].slice(0,60);
 }
 
 function extractOfficialShopImages(html:string){
@@ -132,6 +150,48 @@ function chooseDominantGallery(images:string[]){
   return [...new Set(best)].slice(0,12);
 }
 
+function collectBlibliGalleryImages(value:any,productCode:string|null){
+  const found:string[]=[];
+
+  function visit(node:any,keyHint:string){
+    if(typeof node==="string"){
+      if(!/(image|gallery|media|photo|picture)/i.test(keyHint)) return;
+      const src=normalizeCatalogImageUrl(node);
+      if(!isBlibliCatalogImage(src)) return;
+      if(productCode&&!src.toUpperCase().includes(productCode.toUpperCase())) return;
+      if(!found.includes(src)) found.push(src);
+      return;
+    }
+
+    if(Array.isArray(node)){
+      for(const item of node) visit(item,keyHint);
+      return;
+    }
+
+    if(!node||typeof node!=="object") return;
+
+    for(const [key,child] of Object.entries(node)){
+      const nextHint=/(image|gallery|media|photo|picture)/i.test(key)?key:keyHint;
+      visit(child,nextHint);
+    }
+  }
+
+  visit(value,"");
+  return found.slice(0,30);
+}
+
+function imageFromSummaryItem(item:any){
+  if(typeof item==="string") return item;
+  return item?.full
+    ||item?.original
+    ||item?.large
+    ||item?.medium
+    ||item?.image
+    ||item?.url
+    ||item?.thumbnail
+    ||null;
+}
+
 async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null):Promise<{title:string|null;images:string[]}>{
   if(!productId) return {title:null,images:[]};
 
@@ -168,14 +228,26 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
 
         const payload=await res.json();
         const data=payload?.data||payload;
-        const images:string[]=(Array.isArray(data?.images)?data.images:[])
-          .map((item:any)=>item?.full||item?.large||item?.medium||item?.thumbnail||null)
-          .filter((x:unknown):x is string=>typeof x==="string"&&/^https?:\/\//i.test(x));
+        const productCode=typeof data?.productCode==="string"?data.productCode:null;
+
+        const directImages=(Array.isArray(data?.images)?data.images:[])
+          .map(imageFromSummaryItem)
+          .filter((x:unknown):x is string=>typeof x==="string")
+          .map(normalizeCatalogImageUrl)
+          .filter(isBlibliCatalogImage)
+          .filter(src=>!productCode||src.toUpperCase().includes(productCode.toUpperCase()));
+
+        // Blibli's _summary response can expose only 1-2 selected-SKU images in
+        // data.images while the rest of the visible product media sits under
+        // image-bearing fields such as attributes[].values[].image. Walk those
+        // image/gallery/media fields too, then promote thumbnails to full size.
+        const embeddedImages=collectBlibliGalleryImages(data,productCode);
+        const images=[...new Set([...directImages,...embeddedImages])].slice(0,30);
 
         if(images.length){
           return {
             title:typeof data?.name==="string"?data.name.trim():null,
-            images:[...new Set(images)].slice(0,20)
+            images
           };
         }
       }catch{}
