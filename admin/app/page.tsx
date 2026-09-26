@@ -118,14 +118,25 @@ function sanitizeProductImages(images:string[]){
   const seen=new Set<string>();
   const out:string[]=[];
   for(const raw of images||[]){
-    const url=String(raw||"").trim();
+    let url=String(raw||"").trim();
     if(!/^https:\/\//i.test(url)) continue;
+
+    // Blibli heroThumbnails exposes /thumbnail/ URLs (often ?w=112).
+    // Promote them to the original /full/ gallery image before rendering/syncing.
+    url=url
+      .replace("/images/catalog/thumbnail/","/images/catalog/full/")
+      .replace("/images/catalog/square/","/images/catalog/full/");
+    try{
+      const parsed=new URL(url);
+      ["w","h","width","height","quality","q","resize","format"].forEach(key=>parsed.searchParams.delete(key));
+      url=parsed.toString();
+    }catch{}
+
     const lower=url.toLowerCase();
     if(/\.(?:css|ico|svg)(?:[?#]|$)/i.test(lower)) continue;
     if(/(?:favicon|logo|icon|sprite|avatar|badge|tracking|pixel|placeholder)/i.test(lower)) continue;
     if(!/\.(?:jpe?g|png|webp|avif)(?:[?#]|$)/i.test(lower)) continue;
 
-    // Treat transformed variants such as ?f=webp as the same source image.
     const key=lower.split("?")[0].replace(/\/+/g,"/");
     if(seen.has(key)) continue;
     seen.add(key);
