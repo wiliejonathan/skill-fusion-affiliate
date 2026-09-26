@@ -74,11 +74,7 @@ export const products:Product[]=[
     "brand": "XIAOMI",
     "category": "Charging & Cable",
     "images": [
-      "https://i02.appmifile.com/485_item_id/17/02/2025/1ca3975822d198c41b075f895552eedf.png",
-      "https://i02.appmifile.com/mi-com-product/fly-birds/xiaomi-6a-type-a-to-type-c-cable/de180110a3ff43719b8c159073b904e9.jpg",
-      "https://i02.appmifile.com/mi-com-product/fly-birds/xiaomi-6a-type-a-to-type-c-cable/b28c8e8292c65b13c7802f25ac2f2718.png",
-      "https://i02.appmifile.com/mi-com-product/fly-birds/xiaomi-6a-type-a-to-type-c-cable/d23ad07eaa36bb64d5cdb360bacdb816.jpg",
-      "https://i02.appmifile.com/mi-com-product/fly-birds/xiaomi-6a-type-a-to-type-c-cable/c2d18bdac7d3516d3b328ff0dc9687cb.jpg"
+      "https://i02.appmifile.com/485_item_id/17/02/2025/1ca3975822d198c41b075f895552eedf.png"
     ],
     "affiliateUrl": "https://s.blibli.com/GNtk/5qzuieiw",
     "badge": "Blibli Affiliate",
@@ -93,16 +89,16 @@ export const products:Product[]=[
     "sequence": 4,
     "id": "ACO-60021-00234-00001",
     "canonicalProductId": "ACO-60021-00234-00001",
-    "name": "Online Mall Blibli, Belanja Online Aman, Nyaman & Terpercaya!",
-    "brand": "ACMIC",
-    "category": "Charging & Cable",
-    "images": [
-      "https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"
-    ],
-    "affiliateUrl": "https://s.blibli.com/GNtk/gd0wp7zz",
+    "name": "ACMIC PDC100 power delivery pd 100CM cable usb type c to usb type c",
+    "brand": "",
+    "category": "",
+    "images": [],
+    "affiliateUrl": "",
     "badge": "Blibli Affiliate",
     "features": [
-      "Blibli Affiliate"
+      "100 cm",
+      "USB Type-C",
+      "Power Delivery"
     ],
     "price": null,
     "currency": null
@@ -120,9 +116,7 @@ export const products:Product[]=[
       "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full01_qypmsyee.jpg",
       "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full04_pyp47xtt.jpg",
       "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full05_d1dlpkjc.jpg",
-      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full06_mpxrk7fj.jpg",
-      "https://acmic.id/cdn/shop/files/FLEXYLINE_GambarUtamaCFC_1080x.jpg?v=1698295560",
-      "https://acmic.id/cdn/shop/files/CABLE_FLEXYLINE_7b17bc56-50db-4378-9bd0-c004ca8d6e89_1080x.jpg?v=1698295560"
+      "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-6370783/acmic_acmic_cfc100_usb_type_c_fast_charging_cable_kabel_data_charger_-100_cm-_full06_mpxrk7fj.jpg"
     ],
     "affiliateUrl": "https://s.blibli.com/GNtk/8394nrit",
     "badge": "Blibli Affiliate",
