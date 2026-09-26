@@ -80,3 +80,8 @@ nav a{display:flex;align-items:center;gap:10px;min-height:43px;padding:0 12px;bo
 .multiple-link-hint{margin-top:9px;padding:9px 11px;border-radius:9px;background:#f8fafc;color:#667085;font-size:11px;line-height:1.45}
 .multiple-link-hint strong{color:#344054}
 @media(max-width:560px){.import-mode-bar{display:grid;grid-template-columns:1fr 1fr;width:100%}.import-mode{width:100%;padding:0 8px}.paste-icon-btn{width:40px;height:40px}}
+
+.admin-price-box{margin-top:10px;padding:10px 12px;border:1px solid #c7d2fe;border-radius:10px;background:#f8faff}
+.admin-price-box span{display:block;color:#6366f1;font-size:9px;font-weight:900;letter-spacing:.12em}
+.admin-price-box b{margin-top:3px!important;color:#111827;font-size:16px;line-height:1.2}
+.admin-price-box small{margin-top:3px!important;color:#64748b!important;font-size:10px}
