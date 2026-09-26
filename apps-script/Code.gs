@@ -17,6 +17,25 @@ const OFFICIAL_FALLBACK_PAGES = {
   'ACO-60021-00234-00001':'https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c'
 };
 
+const KNOWN_BLIBLI_GALLERIES = {
+  'XIO-60022-01141-00001':[
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full02_cc3scl4a.jpeg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full03_hrw4dzk1.jpeg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full04_rw5y2lhf.jpeg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full05_q6u0ao56.jpeg'
+  ],
+  'ACO-60021-00234-00001':[
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full01_nhva0kf2.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full01_gyux63fu.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full02_tax0h4ac.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full03_ulrs28kp.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full04_vs6zuqs1.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full05_qvrkqpgn.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full06_q4432wpc.jpg',
+    'https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full07_ln9qkabt.jpg'
+  ]
+};
+
 // Public reads only. Admin credentials and mutations are accepted exclusively in POST bodies.
 function doGet(e){
   const p=(e&&e.parameter)||{};
@@ -175,16 +194,27 @@ function reloadFromBlibli_(p){
   if(p.id&&id!==p.id)throw new Error('Product ID berubah; data lama dipertahankan');
   const html=fetchText_(canonical);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
+
+  // Blibli's visible gallery is rendered as heroThumbnails. Read that exact DOM
+  // structure first, then merge other Blibli HTML/JSON sources.
+  const heroImages=extractHeroThumbnails_(html);
   const htmlImages=extractBlibliGallery_(html,canonical);
-  let gathered=htmlImages.slice();
+  let gathered=heroImages.concat(htmlImages);
+
   const summary=summaryData_(canonical,id);
   if(isUsableProductTitle_(summary.title))title=summary.title;
   gathered=gathered.concat(summary.images);
-  const gallery=rankProductImages_(gathered,id).slice(0,40);
+
+  const gallery=dominantBlibliGallery_(rankProductImages_(gathered,id)).slice(0,40);
   let finalGallery=gallery.length?gallery:(p.images||[]);
-  // Some Blibli product pages expose only one server-side image even though the
-  // exact product has a larger gallery. For those known SKUs only, enrich from
-  // the manufacturer's official page instead of leaving Admin/Client at 1 photo.
+
+  // Exact DOM galleries supplied by Blibli for the current products. These are
+  // only used when the server-side response is sparse, so future complete DOM
+  // galleries still win automatically.
+  const known=KNOWN_BLIBLI_GALLERIES[id]||[];
+  if(known.length>finalGallery.length)finalGallery=known.slice();
+
+  // Manufacturer page remains a final fallback only.
   if(finalGallery.length<4){
     const official=officialFallbackImages_(id);
     if(official.length>finalGallery.length)finalGallery=official;
@@ -288,6 +318,15 @@ function normalizeImage_(s){
   v=v.replace(/^http:\/\//i,'https://');
   v=v.replace('/images/catalog/thumbnail/','/images/catalog/full/').replace('/images/catalog/square/','/images/catalog/full/');
   v=v.split('#')[0];
+
+  // heroThumbnails uses ?w=112. Once promoted to /full/, drop transform params
+  // so Admin and Client receive the original full-resolution product image.
+  try{
+    const u=new URL(v);
+    ['w','h','width','height','quality','q','resize','format'].forEach(function(key){u.searchParams.delete(key)});
+    v=u.toString();
+  }catch(e){}
+
   return /^https:\/\//i.test(v)?v:'';
 }
 function imageKey_(url){
@@ -332,6 +371,24 @@ function extractBlibliGallery_(text,baseUrl){
   return extractProductImages_(text,baseUrl).filter(function(url){
     return /^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(url);
   });
+}
+function extractHeroThumbnails_(html){
+  const n=decodeHtml_(html),out=[];
+  const blocks=n.match(/<div[^>]+data-testid=["']heroThumbnails-\d+["'][\s\S]*?<\/div>/ig)||[];
+
+  blocks.forEach(function(block){
+    // Prefer data-src because it is Blibli's original gallery URL; src often has
+    // the same path plus a small-width transform such as ?w=112.
+    let m=block.match(/data-src=["']([^"']+)["']/i);
+    if(!m)m=block.match(/\ssrc=["']([^"']+)["']/i);
+    if(!m||!m[1])return;
+    const src=normalizeImage_(m[1]);
+    if(/^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(src) && out.indexOf(src)<0){
+      out.push(src);
+    }
+  });
+
+  return out;
 }
 
 function collectSummaryImages_(value,baseUrl){
