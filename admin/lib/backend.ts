@@ -1,23 +1,46 @@
 import {requestAppsScript} from "../../shared/apps-script";
 
+const SESSION_KEY="skillfusion:admin-key";
+const REMEMBER_KEY="skillfusion:adminKey";
 let adminKey:string|undefined;
 
-function clearAdminKey(){
+export function getStoredAdminKey(){
+  if(typeof window==="undefined") return undefined;
+  return window.sessionStorage.getItem(SESSION_KEY)||window.localStorage.getItem(REMEMBER_KEY)||undefined;
+}
+
+export function setAdminKey(key:string,remember:boolean){
+  const value=key.trim();
+  if(!value) throw new Error("Password Admin wajib diisi.");
+  adminKey=value;
+  window.sessionStorage.setItem(SESSION_KEY,value);
+  if(remember) window.localStorage.setItem(REMEMBER_KEY,value);
+  else window.localStorage.removeItem(REMEMBER_KEY);
+}
+
+export function clearAdminKey(){
   adminKey=undefined;
-  window.sessionStorage.removeItem("skillfusion:admin-key");
-  // Remove the legacy key as well. A stale value here previously caused Admin
-  // to keep retrying an invalid password and fall back to the 1-product seed.
-  window.localStorage.removeItem("skillfusion:adminKey");
+  if(typeof window!=="undefined"){
+    window.sessionStorage.removeItem(SESSION_KEY);
+    window.localStorage.removeItem(REMEMBER_KEY);
+  }
 }
 
 function getKey(){
-  adminKey=adminKey||window.sessionStorage.getItem("skillfusion:admin-key")||window.localStorage.getItem("skillfusion:adminKey")||undefined;
-  if(!adminKey){
-    adminKey=window.prompt("Masukkan ADMIN_KEY dari tab Config Google Sheets untuk mengakses Admin.")?.trim()||undefined;
-    if(!adminKey) throw new Error("Admin belum terhubung. Muat ulang halaman dan masukkan ADMIN_KEY.");
-    window.sessionStorage.setItem("skillfusion:admin-key",adminKey);
-  }
+  adminKey=adminKey||getStoredAdminKey();
+  if(!adminKey) throw new Error("ADMIN_AUTH_REQUIRED");
   return adminKey;
+}
+
+export async function verifyAdminKey(key:string,remember:boolean){
+  setAdminKey(key,remember);
+  try{
+    const data=await requestAppsScript("draft",{},getKey());
+    return data;
+  }catch(error){
+    clearAdminKey();
+    throw error;
+  }
 }
 
 // Retains the existing UI's request contract while moving every operation to GAS.
@@ -37,13 +60,8 @@ export async function backendFetch(input:string,init:RequestInit={}){
     const data=await requestAppsScript(action,payload,getKey());
     return {ok:true,json:async()=>data};
   }catch(error){
-    // requestAppsScript removes the session key specifically on UNAUTHORIZED.
-    // When that happens, also purge the legacy localStorage key and retry once
-    // so the user can immediately enter the current Config.ADMIN_KEY.
-    if(!window.sessionStorage.getItem("skillfusion:admin-key")){
+    if(!window.sessionStorage.getItem(SESSION_KEY)){
       clearAdminKey();
-      const data=await requestAppsScript(action,payload,getKey());
-      return {ok:true,json:async()=>data};
     }
     throw error;
   }
