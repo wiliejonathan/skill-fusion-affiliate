@@ -163,16 +163,14 @@ function reloadFromBlibli_(p){
   if(p.id&&id!==p.id)throw new Error('Product ID berubah; data lama dipertahankan');
   const html=fetchText_(canonical);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
-  const htmlImages=extractBlibliImages_(html);
+  const htmlImages=extractProductImages_(html,canonical);
   let gathered=htmlImages.slice();
   const summary=summaryData_(canonical,id);
   if(summary.title)title=summary.title;
   gathered=gathered.concat(summary.images);
-  gathered=unique_(gathered.map(normalizeImage_).filter(Boolean));
-  let gallery=bestGallery_(gathered);
-  const official=officialImages_(id);
-  if(official.length>gallery.length)gallery=official;
-  if((p.images||[]).length>gallery.length)gallery=p.images;
+  gathered=gathered.concat(officialImages_(id));
+  gathered=gathered.concat(p.images||[]);
+  const gallery=rankProductImages_(gathered,id).slice(0,40);
   const price=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i])||p.price||'';
   const currency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||p.currency||'';
   return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:gallery,price:price,currency:currency,source:'blibli-reload'});
@@ -205,14 +203,66 @@ function summaryData_(canonical,id){
   const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'];
   const productSku=id.replace(/-\d{5}$/,'');if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
   let title='',images=[];
-  endpoints.forEach(u=>{const j=fetchJson_(u,canonical);if(!j)return;const data=j.data||j;if(data&&data.name)title=String(data.name);images=images.concat(extractBlibliImages_(JSON.stringify(data)))});
-  return {title:title,images:unique_(images)};
+  endpoints.forEach(u=>{const j=fetchJson_(u,canonical);if(!j)return;const data=j.data||j;if(data&&data.name)title=String(data.name);images=images.concat(extractProductImages_(JSON.stringify(data),canonical))});
+  return {title:title,images:rankProductImages_(images,id)};
 }
-function normalizeImage_(s){if(!s)return '';return String(s).replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\\//g,'/').replace(/^\/\//,'https://').replace(/^http:\/\//i,'https://').replace('/images/catalog/thumbnail/','/images/catalog/full/')}
-function extractBlibliImages_(text){const n=String(text||'').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\\//g,'/');const m=n.match(/(?:https?:)?\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/ig)||[];return unique_(m.map(normalizeImage_))}
-function bestGallery_(images){
-  const groups={};images.forEach(src=>{const m=String(src).match(/MTA-\d+/i);if(!m)return;const k=m[0].toUpperCase();groups[k]=groups[k]||[];if(groups[k].indexOf(src)<0)groups[k].push(src)});
-  const keys=Object.keys(groups).sort((a,b)=>groups[b].length-groups[a].length);return keys.length?groups[keys[0]].slice(0,40):unique_(images).slice(0,40)
+function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
+function normalizeImage_(s){
+  if(!s)return '';
+  let v=decodeHtml_(s).trim().replace(/^["']|["']$/g,'').replace(/^\/\//,'https://').replace(/^http:\/\//i,'https://');
+  v=v.replace('/images/catalog/thumbnail/','/images/catalog/full/').replace('/images/catalog/square/','/images/catalog/full/');
+  v=v.split('#')[0];
+  return /^https:\/\//i.test(v)?v:'';
+}
+function imageKey_(url){
+  const v=normalizeImage_(url);if(!v)return '';
+  return v.toLowerCase().replace(/^https:\/\/[^/]+/,'').replace(/([?&])(width|height|w|h|quality|q|resize|format)=[^&]*/ig,'$1').replace(/[?&]+$/,'');
+}
+function imageLooksUseful_(url){
+  const v=String(url||'').toLowerCase();
+  if(!/^https:\/\//.test(v))return false;
+  if(/(?:logo|icon|sprite|avatar|badge|payment|promo-banner|placeholder|favicon|tracking|pixel|1x1)/.test(v))return false;
+  return /\.(?:jpe?g|png|webp|avif)(?:[?#]|$)/i.test(v)||/(?:static-src\.com|blibli\.com|cdn|image|img|catalog|product)/i.test(v);
+}
+function extractProductImages_(text,baseUrl){
+  const n=decodeHtml_(text),out=[];
+  function add(v){
+    if(!v)return;
+    String(v).split(',').forEach(part=>{
+      let x=part.trim().split(/\s+/)[0];
+      if(/^\//.test(x)&&!/^\/\//.test(x)){
+        const m=String(baseUrl||'').match(/^(https?:\/\/[^/]+)/i);if(m)x=m[1]+x;
+      }
+      x=normalizeImage_(x);if(x&&imageLooksUseful_(x))out.push(x);
+    });
+  }
+  let m;
+  const attrs=/(?:src|data-src|data-original|data-lazy-src|data-zoom-image|content|href)\s*=\s*["']([^"']+)["']/ig;
+  while((m=attrs.exec(n)))add(m[1]);
+  const srcsets=/(?:srcset|data-srcset)\s*=\s*["']([^"']+)["']/ig;
+  while((m=srcsets.exec(n)))add(m[1]);
+  const urls=n.match(/https?:\/\/[^"'\\\s<>]+/ig)||[];
+  urls.forEach(add);
+  return rankProductImages_(out,'');
+}
+function rankProductImages_(images,id){
+  const seen={},rows=[];
+  (images||[]).forEach((raw,index)=>{
+    const url=normalizeImage_(raw),key=imageKey_(url);
+    if(!url||!key||seen[key]||!imageLooksUseful_(url))return;
+    seen[key]=true;
+    let score=0;
+    const low=url.toLowerCase();
+    if(/static-src\.com\/wcsstore\/indraprastha\/images\/catalog\/full\//i.test(low))score+=120;
+    else if(/static-src\.com\/wcsstore\/indraprastha\/images\/catalog\//i.test(low))score+=100;
+    if(/(?:catalog|product|products|pdp)/i.test(low))score+=45;
+    if(/(?:full|large|zoom|original|master|1080|1000x)/i.test(low))score+=25;
+    if(id&&low.indexOf(String(id).toLowerCase())>=0)score+=80;
+    if(/(?:thumbnail|thumb|small|icon|logo|banner|avatar)/i.test(low))score-=60;
+    rows.push({url:url,score:score,index:index});
+  });
+  rows.sort((a,b)=>b.score-a.score||a.index-b.index);
+  return rows.map(x=>x.url);
 }
 function officialImages_(id){
   const urls={
