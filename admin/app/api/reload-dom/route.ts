@@ -38,14 +38,18 @@ function pickGallery(images:string[],ogImage:string|null){
   }
 
   const ogAsset=ogImage?.match(/MTA-\d+/i)?.[0]||null;
-  if(ogAsset){
-    const exact=groups.get(ogAsset);
-    if(exact?.length) return exact.slice(0,40);
-  }
-
   const ranked=[...groups.entries()]
     .filter(([asset])=>asset!=="__NO_ASSET__")
-    .sort((a,b)=>b[1].length-a[1].length);
+    .sort((a,b)=>{
+      const byCount=b[1].length-a[1].length;
+      if(byCount!==0) return byCount;
+      if(ogAsset&&a[0]===ogAsset) return -1;
+      if(ogAsset&&b[0]===ogAsset) return 1;
+      return 0;
+    });
+
+  // The largest coherent MTA group is the gallery. og:image is only a
+  // tie-breaker; it must never force a 1-2 image group over an 8+ image group.
   if(ranked.length) return ranked[0][1].slice(0,40);
   return clean.slice(0,40);
 }
@@ -118,6 +122,17 @@ export async function GET(req:NextRequest){
       document.querySelectorAll("source").forEach(source=>{
         addSrcset(source.getAttribute("srcset"));
         addSrcset(source.getAttribute("data-srcset"));
+      });
+
+      document.querySelectorAll("*").forEach(node=>{
+        const el=node as HTMLElement;
+        const bg=getComputedStyle(el).backgroundImage;
+        if(bg&&bg!=="none"){
+          for(const match of bg.matchAll(/url\\(["']?([^"')]+)["']?\\)/g)) add(match[1]);
+        }
+        for(const attr of ["data-image","data-image-url","data-zoom-image","data-full-image","poster"]){
+          add(el.getAttribute(attr));
+        }
       });
 
       for(const entry of performance.getEntriesByType("resource")){
