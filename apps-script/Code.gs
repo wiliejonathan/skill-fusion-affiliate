@@ -254,15 +254,38 @@ function fetchJson_(url,referer){
 }
 function summaryData_(canonical,id){
   const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'];
-  const productSku=id.replace(/-\d{5}$/,'');if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
+  const productSku=id.replace(/-\d{5}$/,'');
+  if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
+
   let title='',images=[];
-  endpoints.forEach(u=>{const j=fetchJson_(u,canonical);if(!j)return;const data=j.data||j;if(data&&data.name)title=String(data.name);images=images.concat(extractBlibliGallery_(JSON.stringify(data),canonical))});
-  return {title:title,images:rankProductImages_(images,id)};
+  endpoints.forEach(function(u){
+    const j=fetchJson_(u,canonical);
+    if(!j)return;
+    const data=j.data||j;
+    if(data&&data.name)title=String(data.name);
+
+    const productCode=data&&typeof data.productCode==='string'?String(data.productCode):'';
+    let current=collectSummaryImages_(data,canonical);
+
+    if(/^MTA-\d+$/i.test(productCode)){
+      const exact=current.filter(function(src){
+        return src.toUpperCase().indexOf(productCode.toUpperCase())>=0;
+      });
+      if(exact.length)current=exact;
+    }
+    images=images.concat(current);
+  });
+
+  const ranked=rankProductImages_(images,id);
+  return {title:title,images:dominantBlibliGallery_(ranked)};
 }
 function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
 function normalizeImage_(s){
   if(!s)return '';
-  let v=decodeHtml_(s).trim().replace(/^["']|["']$/g,'').replace(/^\/\//,'https://').replace(/^http:\/\//i,'https://');
+  let v=decodeHtml_(s).trim().replace(/^["']|["']$/g,'');
+  if(/^\/\//.test(v))v='https:'+v;
+  else if(/^(?:www\.)?static-src\.com\//i.test(v))v='https://'+v;
+  v=v.replace(/^http:\/\//i,'https://');
   v=v.replace('/images/catalog/thumbnail/','/images/catalog/full/').replace('/images/catalog/square/','/images/catalog/full/');
   v=v.split('#')[0];
   return /^https:\/\//i.test(v)?v:'';
@@ -281,9 +304,9 @@ function extractProductImages_(text,baseUrl){
   const n=decodeHtml_(text),out=[];
   function add(v){
     if(!v)return;
-    String(v).split(',').forEach(part=>{
+    String(v).split(',').forEach(function(part){
       let x=part.trim().split(/\s+/)[0];
-      if(/^\//.test(x)&&!/^\/\//.test(x)){
+      if(/^\/(?!\/)/.test(x)){
         const m=String(baseUrl||'').match(/^(https?:\/\/[^/]+)/i);if(m)x=m[1]+x;
       }
       x=normalizeImage_(x);if(x&&imageLooksUseful_(x))out.push(x);
@@ -294,8 +317,11 @@ function extractProductImages_(text,baseUrl){
   while((m=attrs.exec(n)))add(m[1]);
   const srcsets=/(?:srcset|data-srcset)\s*=\s*["']([^"']+)["']/ig;
   while((m=srcsets.exec(n)))add(m[1]);
-  const urls=n.match(/https?:\/\/[^"'\\\s<>]+/ig)||[];
-  urls.forEach(add);
+
+  const absolute=n.match(/https?:\/\/[^"'\\\s<>]+/ig)||[];
+  const protocolRelative=n.match(/\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/ig)||[];
+  const schemeLess=n.match(/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/ig)||[];
+  absolute.concat(protocolRelative,schemeLess).forEach(add);
   return rankProductImages_(out,'');
 }
 function isUsableProductTitle_(title){
@@ -306,6 +332,53 @@ function extractBlibliGallery_(text,baseUrl){
   return extractProductImages_(text,baseUrl).filter(function(url){
     return /^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(url);
   });
+}
+
+function collectSummaryImages_(value,baseUrl){
+  const found=[];
+  function add(raw){
+    const src=normalizeImage_(raw);
+    if(!src)return;
+    if(!/^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(src))return;
+    if(found.indexOf(src)<0)found.push(src);
+  }
+  function visit(node,keyHint){
+    if(typeof node==='string'){
+      if(/image|gallery|media|photo|picture|src|url/i.test(String(keyHint||'')) ||
+         /static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(node)) add(node);
+      return;
+    }
+    if(Array.isArray(node)){
+      node.forEach(function(item){visit(item,keyHint)});
+      return;
+    }
+    if(!node||typeof node!=='object')return;
+    Object.keys(node).forEach(function(key){
+      const child=node[key];
+      const nextHint=/image|gallery|media|photo|picture|src|url/i.test(key)?key:keyHint;
+      visit(child,nextHint);
+    });
+  }
+  visit(value,'');
+  const serialized=extractBlibliGallery_(JSON.stringify(value),baseUrl);
+  serialized.forEach(function(src){if(found.indexOf(src)<0)found.push(src)});
+  return found;
+}
+
+function dominantBlibliGallery_(images){
+  if(!images||!images.length)return [];
+  const groups={};
+  images.forEach(function(src){
+    const m=String(src).match(/MTA-\d+/i);
+    if(!m)return;
+    const key=m[0].toUpperCase();
+    if(!groups[key])groups[key]=[];
+    if(groups[key].indexOf(src)<0)groups[key].push(src);
+  });
+  const keys=Object.keys(groups);
+  if(!keys.length)return images;
+  keys.sort(function(a,b){return groups[b].length-groups[a].length});
+  return groups[keys[0]].length?groups[keys[0]]:images;
 }
 function rankProductImages_(images,id){
   const seen={},rows=[];
