@@ -159,6 +159,10 @@ function savePublish_(request){
     if(current&&(!p.images||!p.images.length)&&current.images&&current.images.length){
       p.images=current.images.slice();
     }
+    if(current&&!normalizePrice_(p.price)&&normalizePrice_(current.price)){
+      p.price=current.price;
+      p.currency=current.currency||p.currency||'IDR';
+    }
 
     p.sequence=current?current.sequence:++sequence;
   });
@@ -261,8 +265,10 @@ function reloadFromBlibli_(p){
     const official=officialFallbackImages_(id);
     if(official.length>finalGallery.length)finalGallery=official;
   }
-  const price=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i])||p.price||'';
-  const currency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||p.currency||'';
+  const htmlPrice=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i]);
+  const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
+  const price=normalizePrice_(summary.price||htmlPrice||p.price||'');
+  const currency=(summary.currency||htmlCurrency||p.currency||(price?'IDR':'')).toUpperCase();
   if(!isUsableProductTitle_(title))title=p.name;
   return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,source:'blibli-reload'});
 }
@@ -390,7 +396,7 @@ function summaryData_(canonical,id){
   const productSku=id.replace(/-\d{5}$/,'');
   if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
 
-  let title='',images=[];
+  let title='',images=[],price='',currency='';
   endpoints.forEach(function(u){
     const j=fetchJson_(u,canonical);
     if(!j)return;
@@ -407,12 +413,90 @@ function summaryData_(canonical,id){
       if(exact.length)current=exact;
     }
     images=images.concat(current);
+
+    const priceData=extractSummaryPrice_(data);
+    if(priceData.price){
+      price=priceData.price;
+      currency=priceData.currency||currency||'IDR';
+    }
   });
 
   const ranked=rankProductImages_(images,id);
-  return {title:title,images:dominantBlibliGallery_(ranked)};
+  return {title:title,images:dominantBlibliGallery_(ranked),price:price,currency:currency};
 }
 function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
+function normalizePrice_(value){
+  if(value===null||value===undefined)return '';
+  if(typeof value==='number'){
+    return isFinite(value)&&value>0?String(Math.round(value)):'';
+  }
+
+  const text=String(value).trim();
+  if(!text)return '';
+
+  // Blibli commonly returns Indonesian formatted values such as "19.900".
+  const digits=text.replace(/[^0-9]/g,'');
+  if(!digits)return '';
+  const numeric=Number(digits);
+  return isFinite(numeric)&&numeric>0?String(Math.round(numeric)):'';
+}
+function extractSummaryPrice_(value){
+  const candidates=[];
+  let currency='';
+
+  const priority={
+    finalprice:120,
+    saleprice:115,
+    sellingprice:112,
+    offerprice:110,
+    discountedprice:108,
+    currentprice:106,
+    itemprice:104,
+    price:100,
+    minprice:80,
+    originalprice:20,
+    strikeprice:15,
+    strikethroughprice:15
+  };
+
+  function visit(node,keyHint){
+    if(node===null||node===undefined)return;
+
+    if(typeof node==='number'||typeof node==='string'){
+      const key=String(keyHint||'').toLowerCase().replace(/[^a-z]/g,'');
+      if(/currency/.test(key)){
+        const cur=String(node).trim().toUpperCase();
+        if(/^[A-Z]{3}$/.test(cur))currency=cur;
+        return;
+      }
+
+      if(Object.prototype.hasOwnProperty.call(priority,key)){
+        const price=normalizePrice_(node);
+        if(price)candidates.push({price:price,score:priority[key]});
+      }
+      return;
+    }
+
+    if(Array.isArray(node)){
+      node.forEach(function(item){visit(item,keyHint)});
+      return;
+    }
+
+    if(typeof node==='object'){
+      Object.keys(node).forEach(function(key){visit(node[key],key)});
+    }
+  }
+
+  visit(value,'');
+  if(!candidates.length)return {price:'',currency:currency||''};
+
+  candidates.sort(function(a,b){
+    if(b.score!==a.score)return b.score-a.score;
+    return Number(a.price)-Number(b.price);
+  });
+
+  return {price:candidates[0].price,currency:currency||'IDR'};
+}
 function normalizeImage_(s){
   if(!s)return '';
   let v=decodeHtml_(s).trim().replace(/^["']|["']$/g,'');
