@@ -66,6 +66,16 @@ export async function GET(req:NextRequest){
   const raw=req.nextUrl.searchParams.get("url");
   if(!raw) return NextResponse.json({ok:false,message:"url wajib diisi"},{status:400});
 
+  try{
+    const source=new URL(raw);
+    const host=source.hostname.toLowerCase();
+    if(host!=="blibli.com"&&!host.endsWith(".blibli.com")){
+      return NextResponse.json({ok:false,message:"Reload DOM hanya menerima URL Blibli"},{status:400});
+    }
+  }catch{
+    return NextResponse.json({ok:false,message:"URL Blibli tidak valid"},{status:400});
+  }
+
   let browser:Awaited<ReturnType<typeof puppeteer.launch>>|null=null;
 
   try{
@@ -80,6 +90,10 @@ export async function GET(req:NextRequest){
     await page.setUserAgent(UA);
     await page.setExtraHTTPHeaders({
       "accept-language":"id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
+    });
+    await page.evaluateOnNewDocument(()=>{
+      Object.defineProperty(navigator,"webdriver",{get:()=>undefined});
+      Object.defineProperty(navigator,"languages",{get:()=>["id-ID","id","en-US","en"]});
     });
 
     await page.goto(raw,{waitUntil:"domcontentloaded",timeout:45000});
