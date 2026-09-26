@@ -3,7 +3,7 @@ const DRAFT_SHEET = 'Draft';
 const PUBLISHED_SHEET = 'Published';
 const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
-const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source'];
+const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description'];
 
 const PRODUCT_FETCH_UAS = [
   'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)',
@@ -78,7 +78,7 @@ function validBlibliUrl_(url){
   if(!/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value))throw new Error('URL harus HTTPS Blibli');
   return value;
 }
-function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null}}
+function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,description:p.description||null}}
 function resolveProduct_(url){
   validBlibliUrl_(url);
 
@@ -100,7 +100,8 @@ function resolveProduct_(url){
     badge:'Blibli Affiliate',
     features:[],
     price:'',
-    currency:''
+    currency:'',
+    description:''
   };
 
   const p=reloadFromBlibli_(seed);
@@ -128,7 +129,7 @@ function validateProduct_(p){
   validBlibliUrl_(p.affiliateUrl);
   if(p.canonicalUrl){validBlibliUrl_(p.canonicalUrl);if(productId_(p.canonicalUrl)!==id)throw new Error('Product ID tidak cocok dengan URL')}
   if(!Array.isArray(p.images)||p.images.some(x=>typeof x!=='string'||!/^https:\/\//i.test(x)))throw new Error('Foto produk tidak valid');
-  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim()});
+  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim(),description:cleanDescription_(p.description||'')});
 }
 function savePublish_(request){
   const input=request.product?[request.product]:request.products;
@@ -163,6 +164,9 @@ function savePublish_(request){
       p.price=current.price;
       p.currency=current.currency||p.currency||'IDR';
     }
+    if(current&&!cleanDescription_(p.description||'')&&cleanDescription_(current.description||'')){
+      p.description=current.description;
+    }
 
     p.sequence=current?current.sequence:++sequence;
   });
@@ -194,10 +198,10 @@ function rowToProduct_(r){
   let images=[],features=[];
   try{images=JSON.parse(r[6]||'[]')}catch(e){}
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
-  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||'')};
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||'')};
 }
 function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
-function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script'].map(safeCell_)}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||''].map(safeCell_)}
 function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
 function findRow_(name,id){const s=sheet_(name);if(s.getLastRow()<2)return -1;const v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
 function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
@@ -269,8 +273,13 @@ function reloadFromBlibli_(p){
   const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
   const price=normalizePrice_(summary.price||htmlPrice||p.price||'');
   const currency=(summary.currency||htmlCurrency||p.currency||(price?'IDR':'')).toUpperCase();
+  const htmlDescription=pick_(html,[
+    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i
+  ]);
+  const description=cleanDescription_(summary.description||htmlDescription||p.description||'');
   if(!isUsableProductTitle_(title))title=p.name;
-  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,source:'blibli-reload'});
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,source:'blibli-reload'});
 }
 function resolveUrl_(url){
   let current=url,html='';
@@ -396,7 +405,7 @@ function summaryData_(canonical,id){
   const productSku=id.replace(/-\d{5}$/,'');
   if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
 
-  let title='',images=[],price='',currency='';
+  let title='',images=[],price='',currency='',description='';
   endpoints.forEach(function(u){
     const j=fetchJson_(u,canonical);
     if(!j)return;
@@ -419,12 +428,82 @@ function summaryData_(canonical,id){
       price=priceData.price;
       currency=priceData.currency||currency||'IDR';
     }
+
+    const currentDescription=extractSummaryDescription_(data);
+    if(currentDescription.length>description.length)description=currentDescription;
   });
 
   const ranked=rankProductImages_(images,id);
-  return {title:title,images:dominantBlibliGallery_(ranked),price:price,currency:currency};
+  return {title:title,images:dominantBlibliGallery_(ranked),price:price,currency:currency,description:description};
 }
 function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
+function cleanDescription_(value){
+  let text=decodeHtml_(value||'');
+  if(!text)return '';
+
+  text=text
+    .replace(/<script[\s\S]*?<\/script>/ig,' ')
+    .replace(/<style[\s\S]*?<\/style>/ig,' ')
+    .replace(/<br\s*\/?>/ig,'\n')
+    .replace(/<\/p>|<\/li>|<\/div>/ig,'\n')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/ig,' ')
+    .replace(/&lt;/ig,'<')
+    .replace(/&gt;/ig,'>')
+    .replace(/&#39;|&apos;/ig,"'")
+    .replace(/\r/g,'')
+    .replace(/[ \t]+/g,' ')
+    .replace(/\n[ \t]+/g,'\n')
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
+
+  if(text.length<20)return '';
+  return text.slice(0,5000);
+}
+function extractSummaryDescription_(value){
+  const candidates=[];
+  const scores={
+    productdescription:130,
+    description:120,
+    shortdescription:115,
+    longdescription:115,
+    productdetail:105,
+    productdetails:105,
+    overview:100,
+    summary:90
+  };
+
+  function visit(node,keyHint){
+    if(node===null||node===undefined)return;
+
+    if(typeof node==='string'){
+      const key=String(keyHint||'').toLowerCase().replace(/[^a-z]/g,'');
+      const score=scores[key]||0;
+      if(score){
+        const text=cleanDescription_(node);
+        if(text)candidates.push({text:text,score:score});
+      }
+      return;
+    }
+
+    if(Array.isArray(node)){
+      node.forEach(function(item){visit(item,keyHint)});
+      return;
+    }
+
+    if(typeof node==='object'){
+      Object.keys(node).forEach(function(key){visit(node[key],key)});
+    }
+  }
+
+  visit(value,'');
+  if(!candidates.length)return '';
+  candidates.sort(function(a,b){
+    if(b.score!==a.score)return b.score-a.score;
+    return b.text.length-a.text.length;
+  });
+  return candidates[0].text;
+}
 function normalizePrice_(value){
   if(value===null||value===undefined)return '';
   if(typeof value==='number'){
