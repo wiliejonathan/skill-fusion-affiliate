@@ -17,6 +17,8 @@ export default function ProductDetail({product}:{product:Product}){
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const images=product.images||[];
   const count=images.length;
+  const description=String(product.description||"").trim()||
+    `${product.name} adalah produk ${product.category.toLowerCase()} dari ${product.brand}. ${product.features.length?`Fitur utama: ${product.features.join(", ")}.`:""}`;
 
   useEffect(()=>{
     setLiked(readWishlist().includes(product.id));
@@ -129,6 +131,11 @@ export default function ProductDetail({product}:{product:Product}){
             <span>LIVE MARKET PRICE</span>
             <strong>CHECK @ BLIBLI</strong>
             <small>Harga, promo, varian, dan stok diperbarui di halaman merchant saat penawaran dibuka.</small>
+          </div>
+
+          <div className="detail-description">
+            <h2>PRODUCT DESCRIPTION</h2>
+            <p>{description}</p>
           </div>
 
           <div className="detail-specs">
