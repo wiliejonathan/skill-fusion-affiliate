@@ -238,44 +238,14 @@ function titleFromBlibliUrl(value:string){
 }
 
 async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedProduct|null>{
-  try{
-    // Browser-side emergency resolver. Primary path stays Apps Script; this only
-    // runs when an older deployed Apps Script rejects a valid shortlink because
-    // gallery metadata is missing.
-    const endpoint="https://api.microlink.io/?url="+encodeURIComponent(inputUrl);
-    const response=await globalThis.fetch(endpoint,{cache:"no-store"});
-    if(!response.ok) return null;
-    const payload=await response.json();
-    const data=payload?.data||{};
-
-    const candidates=[
-      data?.url,
-      data?.publisher?.url,
-      data?.author?.url
-    ].filter((value:unknown):value is string=>typeof value==="string");
-
-    let finalUrl="";
-    for(const value of candidates){
-      if(/^https:\/\/(?:www\.)?blibli\.com\/p\//i.test(value)&&productIdFromBlibliUrl(value)){
-        finalUrl=value;
-        break;
-      }
-    }
-    if(!finalUrl) return null;
-
+  function fromFinalUrl(finalUrl:string,titleHint?:string,imageHints:string[]=[]):ResolvedProduct|null{
     const canonicalUrl=canonicalBlibliUrl(finalUrl);
     const canonicalProductId=productIdFromBlibliUrl(canonicalUrl);
     if(!canonicalProductId) return null;
 
-    const rawImages=[
-      data?.image?.url,
-      data?.image,
-      data?.logo?.url
-    ].filter((value:unknown):value is string=>typeof value==="string");
-
-    const images=sanitizeProductImages(rawImages);
-    const title=isUsableProductTitle(data?.title)
-      ? String(data.title).replace(/\s*[|\-]\s*Blibli.*$/i,"").trim()
+    const images=sanitizeProductImages(imageHints);
+    const title=isUsableProductTitle(titleHint)
+      ? String(titleHint).replace(/\s*[|\-]\s*Blibli.*$/i,"").trim()
       : titleFromBlibliUrl(canonicalUrl);
 
     return {
@@ -290,9 +260,59 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
       price:null,
       currency:null
     };
-  }catch{
-    return null;
   }
+
+  // Fallback 1: metadata resolver. This runs only when the primary Apps Script
+  // resolver is stale/unavailable.
+  try{
+    const endpoint="https://api.microlink.io/?url="+encodeURIComponent(inputUrl);
+    const response=await globalThis.fetch(endpoint,{cache:"no-store"});
+    if(response.ok){
+      const payload=await response.json();
+      const data=payload?.data||{};
+      const candidates=[
+        data?.url,
+        data?.publisher?.url,
+        data?.author?.url
+      ].filter((value:unknown):value is string=>typeof value==="string");
+
+      // Some metadata services keep the short URL in data.url but include the
+      // resolved Blibli product URL elsewhere in the payload.
+      const serialized=JSON.stringify(data).replace(/\\u002F/ig,"/");
+      const embedded=serialized.match(/https:\/\/(?:www\.)?blibli\.com\/p\/[^"\\\s<>]+\/is--[A-Za-z0-9-]+/i);
+      if(embedded?.[0]) candidates.unshift(embedded[0]);
+
+      const imageHints=[
+        data?.image?.url,
+        data?.image,
+        data?.logo?.url
+      ].filter((value:unknown):value is string=>typeof value==="string");
+
+      for(const value of candidates){
+        if(/^https:\/\/(?:www\.)?blibli\.com\/p\//i.test(value)&&productIdFromBlibliUrl(value)){
+          const resolved=fromFinalUrl(value,data?.title,imageHints);
+          if(resolved) return resolved;
+        }
+      }
+    }
+  }catch{}
+
+  // Fallback 2: reader proxy. It follows the shortlink server-side and usually
+  // exposes the final canonical Blibli product URL in the returned text.
+  try{
+    const endpoint="https://r.jina.ai/"+inputUrl;
+    const response=await globalThis.fetch(endpoint,{cache:"no-store"});
+    if(response.ok){
+      const body=await response.text();
+      const match=body.match(/https:\/\/(?:www\.)?blibli\.com\/p\/[^\s<>"')]+\/is--[A-Za-z0-9-]+/i);
+      if(match?.[0]){
+        const resolved=fromFinalUrl(match[0]);
+        if(resolved) return resolved;
+      }
+    }
+  }catch{}
+
+  return null;
 }
 
 export default function AdminPage(){
