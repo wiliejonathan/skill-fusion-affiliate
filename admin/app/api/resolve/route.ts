@@ -12,7 +12,8 @@ function pick(html:string,patterns:RegExp[]){
 
 const OFFICIAL_FALLBACK_PAGES:Record<string,string>={
   "ACO-60021-00122-00005":"https://acmic.id/products/acmic-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable",
-  "ACO-60021-00234-00001":"https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c"
+  "ACO-60021-00234-00001":"https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c",
+  "XIO-60022-01141-00001":"https://www.mi.co.id/id/product/xiaomi-6a-type-a-to-type-c-cable/"
 };
 
 const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
@@ -74,7 +75,8 @@ function extractOfficialShopImages(html:string){
   const normalized=normalizeHtmlForImages(html);
   const matches=[
     ...(normalized.match(/https:\/\/acmic\.id\/cdn\/shop\/files\/[^"'\\\s<>]+/gi)||[]),
-    ...(normalized.match(/https:\/\/cdn\.shopify\.com\/s\/files\/[^"'\\\s<>]+/gi)||[])
+    ...(normalized.match(/https:\/\/cdn\.shopify\.com\/s\/files\/[^"'\\\s<>]+/gi)||[]),
+    ...(normalized.match(/https:\/\/i02\.appmifile\.com\/[^"'\\\s<>]+/gi)||[])
   ];
   return [...new Set(matches)]
     .map(src=>src.replace(/\\u0026/gi,"&"))
