@@ -25,13 +25,6 @@ const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
     "https://acmic.id/cdn/shop/files/FLEXYLINE_GambarUtamaCFC_1080x.jpg?v=1698295560",
     "https://acmic.id/cdn/shop/files/CABLE_FLEXYLINE_7b17bc56-50db-4378-9bd0-c004ca8d6e89_1080x.jpg?v=1698295560"
   ],
-  "XIO-60022-01141-00001":[
-    "https://4phones.eu/cdn/shop/files/90000810874_A.jpg?v=1770447730",
-    "https://xlineparts.com/storage/images/products/1738406224_7799.jpg"
-  ],
-  "ACO-60021-00234-00001":[
-    "https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"
-  ],
   "ACO-60021-00070-00001":[
     "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-3937306/acmic_acmic_fc100_kabel_data_charger_usb_type_c_100cm_fast_charging_cable_-_hitam_full14_ge6ro4m0.jpeg",
     "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-3937306/acmic_acmic_fc100_kabel_data_charger_usb_type_c_100cm_fast_charging_cable_-_hitam_full15_frg35cse.png",
@@ -193,69 +186,102 @@ function imageFromSummaryItem(item:any){
     ||null;
 }
 
+function productSkuFromItemSku(productId:string|null){
+  if(!productId) return null;
+  return productId.replace(/-\d{5}$/,"")||null;
+}
+
 async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null):Promise<{title:string|null;images:string[]}>{
   if(!productId) return {title:null,images:[]};
 
   try{
     const source=new URL(sourceUrl);
     const pickupPointCode=source.searchParams.get("pickupPointCode");
-    const endpoint=new URL(
+    const productSku=productSkuFromItemSku(productId);
+
+    const endpoints:URL[]=[];
+
+    // Item summary: selected SKU / variant.
+    const itemEndpoint=new URL(
       "https://www.blibli.com/backend/product-detail/products/is--"+
       encodeURIComponent(productId)+"/_summary"
     );
-    if(pickupPointCode) endpoint.searchParams.set("pickupPointCode",pickupPointCode);
+    if(pickupPointCode) itemEndpoint.searchParams.set("pickupPointCode",pickupPointCode);
+    endpoints.push(itemEndpoint);
+
+    // Product summary: Blibli also exposes a product-level endpoint. This is
+    // important because some pages only return 1-2 images from the item endpoint,
+    // while the product-level response contains the complete media/attribute set.
+    if(productSku&&productSku!==productId){
+      const productEndpoint=new URL(
+        "https://www.blibli.com/backend/product-detail/products/ps--"+
+        encodeURIComponent(productSku)+"/_summary"
+      );
+      productEndpoint.searchParams.set("defaultItemSku",productId);
+      productEndpoint.searchParams.set("cnc","false");
+      if(pickupPointCode) productEndpoint.searchParams.set("pickupPointCode",pickupPointCode);
+      endpoints.push(productEndpoint);
+    }
 
     const userAgents=[
       "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)",
       UA,
+      "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/143 Mobile Safari/537.36",
       "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
     ];
 
-    for(const ua of userAgents){
-      try{
-        const res=await fetch(endpoint.toString(),{
-          cache:"no-store",
-          redirect:"follow",
-          headers:{
-            "user-agent":ua,
-            "accept":"application/json,text/plain,*/*",
-            "accept-language":"id-ID,id;q=0.9,en;q=0.8",
-            "referer":canonicalProductUrl(sourceUrl),
-            "pragma":"no-cache",
-            "cache-control":"no-cache"
+    let bestTitle:string|null=null;
+    const collected:string[]=[];
+
+    for(const endpoint of endpoints){
+      for(const ua of userAgents){
+        try{
+          const res=await fetch(endpoint.toString(),{
+            cache:"no-store",
+            redirect:"follow",
+            headers:{
+              "user-agent":ua,
+              "accept":"application/json,text/plain,*/*",
+              "accept-language":"id-ID,id;q=0.9,en;q=0.8",
+              "referer":canonicalProductUrl(sourceUrl),
+              "pragma":"no-cache",
+              "cache-control":"no-cache"
+            }
+          });
+          if(!res.ok) continue;
+
+          const payload=await res.json();
+          const data=payload?.data||payload;
+          if(typeof data?.name==="string"&&data.name.trim()) bestTitle=data.name.trim();
+
+          const productCode=typeof data?.productCode==="string"?data.productCode:null;
+          const assetCode=productCode&&/^MTA-\d+$/i.test(productCode)?productCode:null;
+
+          const directImages=(Array.isArray(data?.images)?data.images:[])
+            .map(imageFromSummaryItem)
+            .filter((x:unknown):x is string=>typeof x==="string")
+            .map(normalizeCatalogImageUrl)
+            .filter(isBlibliCatalogImage)
+            .filter((src:string)=>!assetCode||src.toUpperCase().includes(assetCode.toUpperCase()));
+
+          const embeddedImages=collectBlibliGalleryImages(data,productCode);
+
+          for(const src of [...directImages,...embeddedImages]){
+            if(!collected.includes(src)) collected.push(src);
           }
-        });
-        if(!res.ok) continue;
 
-        const payload=await res.json();
-        const data=payload?.data||payload;
-        const productCode=typeof data?.productCode==="string"?data.productCode:null;
-        const assetCode=productCode&&/^MTA-\d+$/i.test(productCode)?productCode:null;
-
-        const directImages=(Array.isArray(data?.images)?data.images:[])
-          .map(imageFromSummaryItem)
-          .filter((x:unknown):x is string=>typeof x==="string")
-          .map(normalizeCatalogImageUrl)
-          .filter(isBlibliCatalogImage)
-          .filter((src:string)=>!assetCode||src.toUpperCase().includes(assetCode.toUpperCase()));
-
-        // Blibli's _summary response can expose only 1-2 selected-SKU images in
-        // data.images while the rest of the visible product media sits under
-        // image-bearing fields such as attributes[].values[].image. Walk those
-        // image/gallery/media fields too, then promote thumbnails to full size.
-        const embeddedImages=collectBlibliGalleryImages(data,productCode);
-        const images=[...new Set([...directImages,...embeddedImages])].slice(0,30);
-
-        if(images.length){
-          return {
-            title:typeof data?.name==="string"?data.name.trim():null,
-            images
-          };
-        }
-      }catch{}
+          // A complete Blibli product gallery is usually multiple files sharing
+          // the same MTA asset. Return early once we already have a healthy set.
+          const coherent=chooseDominantGallery(collected);
+          if(coherent.length>=8){
+            return {title:bestTitle,images:coherent.slice(0,30)};
+          }
+        }catch{}
+      }
     }
 
-    return {title:null,images:[]};
+    const coherent=chooseDominantGallery(collected);
+    return {title:bestTitle,images:(coherent.length?coherent:collected).slice(0,30)};
   }catch{
     return {title:null,images:[]};
   }
