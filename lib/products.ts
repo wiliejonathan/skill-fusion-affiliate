@@ -11,6 +11,7 @@ export type Product={
   features:string[];
   price?:string|null;
   currency?:string|null;
+  description?:string|null;
 };
 
 export const categories=["Semua","Charging & Cable"];
