@@ -38,6 +38,7 @@ const initialCatalog:CatalogIdentity[]=[{
 
 const STORAGE_CATALOG_KEY="skill-fusion:admin:catalog:v1";
 const STORAGE_RESOLVED_KEY="skill-fusion:admin:resolved:v1";
+const STORAGE_GALLERY_RESCAN_KEY="skill-fusion:admin:gallery-rescan:v2";
 
 const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
@@ -253,6 +254,73 @@ export default function AdminPage(){
     return ()=>{cancelled=true};
   },[hydrated]);
 
+  useEffect(()=>{
+    if(!hydrated) return;
+
+    try{
+      if(window.localStorage.getItem(STORAGE_GALLERY_RESCAN_KEY)==="1") return;
+    }catch{}
+
+    let cancelled=false;
+
+    (async()=>{
+      const patched={...resolved};
+      let changed=false;
+      let upgraded=0;
+
+      for(const item of catalog){
+        const key=item.affiliateUrl||"";
+        if(!key) continue;
+
+        const current=patched[key];
+        const source=item.canonicalUrl||current?.canonicalUrl||key;
+        const currentCount=current?.images?.length||(current?.image?1:0);
+
+        try{
+          const res=await fetch(
+            "/api/resolve?url="+encodeURIComponent(source)+"&refreshGallery="+Date.now(),
+            {cache:"no-store"}
+          );
+          const data:ResolvedProduct=await res.json();
+          const nextCount=data?.images?.length||0;
+
+          // Never shrink an existing gallery. This migration only repairs
+          // products where the improved resolver can prove that more media exists.
+          if(data?.ok&&nextCount>currentCount){
+            patched[key]={
+              ...current,
+              ...data,
+              inputUrl:key,
+              image:data.images?.[0]||data.image||current?.image||null,
+              images:data.images
+            };
+            changed=true;
+            upgraded++;
+          }
+        }catch{}
+      }
+
+      if(cancelled) return;
+
+      if(changed){
+        setResolved(patched);
+        const synced=await pushDatabase(catalog,patched);
+        if(synced){
+          const local=dbToLocal(synced);
+          setCatalog(local.catalog);
+          setResolved(local.resolved);
+        }
+        setNotice(`Galeri produk diperiksa ulang · ${upgraded} produk mendapat foto tambahan.`);
+      }
+
+      try{
+        window.localStorage.setItem(STORAGE_GALLERY_RESCAN_KEY,"1");
+      }catch{}
+    })();
+
+    return ()=>{cancelled=true};
+  },[hydrated]);
+
   const checks=useMemo(()=>{
     const lines=[...new Set(text.split(/\r?\n|\s+(?=https?:\/\/)/).map(x=>x.trim()).filter(Boolean))];
     const candidates:Array<ImportCandidate|{invalidUrl:string}>=lines.map(line=>{
@@ -322,7 +390,7 @@ export default function AdminPage(){
 
     const item=catalog.find(x=>x.affiliateUrl===url);
     const previous=resolved[url];
-    const source=url||item?.canonicalUrl||previous?.canonicalUrl||"";
+    const source=item?.canonicalUrl||previous?.canonicalUrl||url||"";
 
     setRefreshingUrl(url);
     setProductNotice(prev=>({...prev,[url]:"Mengambil ulang data produk..."}));
