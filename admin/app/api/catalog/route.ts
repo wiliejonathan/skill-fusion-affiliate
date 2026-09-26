@@ -28,6 +28,8 @@ async function ensureSchema(){
       canonical_url text,
       badge text NOT NULL DEFAULT 'Blibli Affiliate',
       features jsonb NOT NULL DEFAULT '[]'::jsonb,
+      price text,
+      currency text,
       active boolean NOT NULL DEFAULT true,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
@@ -40,6 +42,9 @@ async function ensureSchema(){
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `;
+  await sql`ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS price text`;
+  await sql`ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS currency text`;
+
   const seeded=await sql`SELECT value FROM catalog_meta WHERE key='seeded' LIMIT 1`;
   if(!seeded.length){
     for(const p of SEED){
@@ -82,7 +87,9 @@ function rowToProduct(row:any){
     affiliateUrl:row.affiliate_url,
     canonicalUrl:row.canonical_url,
     badge:row.badge,
-    features:Array.isArray(row.features)?row.features:[]
+    features:Array.isArray(row.features)?row.features:[],
+    price:row.price||null,
+    currency:row.currency||null
   };
 }
 
@@ -91,7 +98,7 @@ export async function GET(){
     const sql=await ensureSchema();
     const rows=await sql`
       SELECT sequence,id,canonical_product_id,name,brand,category,images,
-             affiliate_url,canonical_url,badge,features
+             affiliate_url,canonical_url,badge,features,price,currency
       FROM catalog_products
       WHERE active=true
       ORDER BY sequence ASC,created_at ASC
@@ -118,12 +125,12 @@ export async function POST(req:NextRequest){
       await sql`
         INSERT INTO catalog_products(
           sequence,id,canonical_product_id,name,brand,category,images,
-          affiliate_url,canonical_url,badge,features,active,updated_at
+          affiliate_url,canonical_url,badge,features,price,currency,active,updated_at
         ) VALUES(
           ${Number(p.sequence)||1},${p.id},${p.canonicalProductId||p.id},${p.name||"Produk Blibli"},
           ${p.brand||"TECH"},${p.category||"Charging & Cable"},${JSON.stringify(p.images||[])}::jsonb,
           ${p.affiliateUrl},${p.canonicalUrl||null},${p.badge||"Blibli Affiliate"},
-          ${JSON.stringify(p.features||[])}::jsonb,true,now()
+          ${JSON.stringify(p.features||[])}::jsonb,${p.price||null},${p.currency||null},true,now()
         )
         ON CONFLICT (id) DO UPDATE SET
           sequence=EXCLUDED.sequence,
@@ -136,6 +143,8 @@ export async function POST(req:NextRequest){
           canonical_url=COALESCE(EXCLUDED.canonical_url,catalog_products.canonical_url),
           badge=EXCLUDED.badge,
           features=CASE WHEN jsonb_array_length(EXCLUDED.features)>0 THEN EXCLUDED.features ELSE catalog_products.features END,
+          price=COALESCE(EXCLUDED.price,catalog_products.price),
+          currency=COALESCE(EXCLUDED.currency,catalog_products.currency),
           active=true,
           updated_at=now()
       `;
