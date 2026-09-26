@@ -1,5 +1,6 @@
 "use client";
 
+import {backendFetch as fetch} from "@/lib/backend";
 import {useEffect,useMemo,useState} from "react";
 import {CheckCircle2,CopyCheck,ExternalLink,LayoutDashboard,Link2,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
@@ -222,32 +223,11 @@ export default function AdminPage(){
 
         if(data?.ok&&Array.isArray(data.products)){
           const server=dbToLocal(data.products as DbProduct[]);
-          const dirty=new Set(loadedDirty);
-          const serverUrls=new Set(server.catalog.map(row=>row.affiliateUrl||"").filter(Boolean));
           setServerReady(true);
-
-          // Server/Client wins by default. Only explicit unsynced Reload DOM
-          // drafts are allowed to override the server copy on this Admin device.
-          const byUrl=new Map<string,CatalogIdentity>();
-          for(const row of server.catalog){
-            if(row.affiliateUrl) byUrl.set(row.affiliateUrl,row);
-          }
-          for(const row of loadedCatalog){
-            const url=row.affiliateUrl||"";
-            if(url&&(dirty.has(url)||!serverUrls.has(url))) byUrl.set(url,row);
-          }
-
-          const mergedCatalog=[...byUrl.values()]
-            .sort((a,b)=>(a.sequence||0)-(b.sequence||0))
-            .map((row,index)=>({...row,sequence:row.sequence||index+1}));
-
-          const mergedResolved={...server.resolved};
-          for(const [url,meta] of Object.entries(loadedResolved)){
-            if(dirty.has(url)||!server.resolved[url]) mergedResolved[url]=meta;
-          }
-
-          setCatalog(mergedCatalog);
-          setResolved(mergedResolved);
+          // Shared Draft is authoritative; never resurrect deleted rows from a device cache.
+          setCatalog(server.catalog);
+          setResolved(server.resolved);
+          setDirtyUrls([]);
         }
       }catch{
         setNotice("Koneksi database belum siap. Data Admin lokal tetap dipertahankan.");
@@ -285,12 +265,14 @@ export default function AdminPage(){
     setNotice("");
     const next={...resolved};
     const newItems:CatalogIdentity[]=[];
+    let failedImports=0;
     let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
 
     for(const item of ready){
       try{
         const res=await fetch("/api/resolve?url="+encodeURIComponent(item.inputUrl),{cache:"no-store"});
         const data:ResolvedProduct=await res.json();
+        if(!data.ok||!data.canonicalProductId) throw new Error(data.message||"Metadata belum lengkap");
         next[item.inputUrl]=data;
         newItems.push({
           sequence:nextSequence++,
@@ -299,15 +281,16 @@ export default function AdminPage(){
           canonicalUrl:data.canonicalUrl
         });
       }catch{
-        next[item.inputUrl]={
-          inputUrl:item.inputUrl,finalUrl:item.inputUrl,canonicalUrl:null,canonicalProductId:null,
-          title:"Produk Blibli",image:null,images:[],price:null,currency:null,ok:false,
-          message:"Link affiliate valid, tetapi metadata belum terbaca."
-        };
-        newItems.push({sequence:nextSequence++,affiliateUrl:item.inputUrl});
+        failedImports++;
+        // Failed metadata is not a product and must not be reported as published.
       }
     }
 
+    if(!newItems.length){
+      setNotice("Import gagal: metadata atau koneksi backend belum siap. Tidak ada produk yang disimpan.");
+      setBusy(false);
+      return;
+    }
     const merged=[...catalog,...newItems];
     setResolved(next);
     setCatalog(merged);
@@ -329,7 +312,7 @@ export default function AdminPage(){
       }
 
       setDirtyUrls(prev=>prev.filter(url=>!newItems.some(item=>item.affiliateUrl===url)));
-      setNotice(`${newItems.length} produk baru berhasil di-import dan langsung disinkronkan ke Client.`);
+      setNotice(`${newItems.length} produk baru berhasil di-import dan langsung disinkronkan ke Client.${failedImports?` ${failedImports} link gagal dibaca.`:""}`);
     }catch{
       const failedUrls=newItems.map(item=>item.affiliateUrl).filter((x):x is string=>Boolean(x));
       setDirtyUrls(prev=>[...new Set([...prev,...failedUrls])]);
@@ -554,17 +537,18 @@ export default function AdminPage(){
     const item=catalog.find(x=>x.affiliateUrl===url);
     const id=item?.canonicalProductId||resolved[url]?.canonicalProductId;
 
-    setCatalog(prev=>prev.filter(x=>x.affiliateUrl!==url));
-    setResolved(prev=>{const n={...prev};delete n[url];return n});
-    setDirtyUrls(prev=>prev.filter(item=>item!==url));
 
     try{
       if(id){
         await fetch("/api/catalog?id="+encodeURIComponent(id),{method:"DELETE"});
       }
+    setCatalog(prev=>prev.filter(x=>x.affiliateUrl!==url));
+    setResolved(prev=>{const n={...prev};delete n[url];return n});
+    setDirtyUrls(prev=>prev.filter(item=>item!==url));
+
       setNotice("Produk dihapus dan langsung disinkronkan ke Client.");
     }catch{
-      setNotice("Produk dihapus lokal, tetapi sinkron server gagal.");
+      setNotice("Penghapusan gagal. Produk tetap dipertahankan; coba lagi.");
     }
   }
 
