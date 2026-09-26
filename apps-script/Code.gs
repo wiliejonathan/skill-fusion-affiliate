@@ -236,13 +236,17 @@ function publishAll_(){
 function deleteOne_(id){if(!id)throw new Error('Product ID wajib diisi');deleteFrom_(DRAFT_SHEET,id);deleteFrom_(PUBLISHED_SHEET,id);log_('DELETE',id,'OK','Dihapus dari Draft & Published');return {ok:true,message:'Produk dihapus'}}
 
 function reloadFromBlibli_(p){
-  const start=validBlibliUrl_(p.canonicalUrl||p.affiliateUrl);
+  // Resolve affiliate URL first. The final Blibli URL can contain pickupPointCode
+  // and selected-item context that Blibli needs before returning the actual price.
+  const start=validBlibliUrl_(p.affiliateUrl||p.canonicalUrl);
   const resolved=resolveUrl_(start);
   const canonical=(resolved.canonical||resolved.finalUrl||start).split('?')[0].replace(/\/$/,'');
   validBlibliUrl_(canonical);
   const id=productId_(canonical)||p.id;
   if(p.id&&id!==p.id)throw new Error('Product ID berubah; data lama dipertahankan');
-  const html=fetchText_(canonical);
+
+  const pricingUrl=productId_(resolved.finalUrl||'')?(resolved.finalUrl||canonical):canonical;
+  const html=fetchText_(pricingUrl);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
 
   // Blibli's visible gallery is rendered as heroThumbnails. Read that exact DOM
@@ -251,7 +255,7 @@ function reloadFromBlibli_(p){
   const htmlImages=extractBlibliGallery_(html,canonical);
   let gathered=heroImages.concat(htmlImages);
 
-  const summary=summaryData_(canonical,id);
+  const summary=summaryData_(canonical,id,pricingUrl);
   if(isUsableProductTitle_(summary.title))title=summary.title;
   gathered=gathered.concat(summary.images);
 
@@ -269,7 +273,7 @@ function reloadFromBlibli_(p){
     const official=officialFallbackImages_(id);
     if(official.length>finalGallery.length)finalGallery=official;
   }
-  const htmlPrice=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i]);
+  const htmlPrice=extractHtmlPrice_(html);
   const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
   const price=normalizePrice_(summary.price||htmlPrice||p.price||'');
   const currency=(summary.currency||htmlCurrency||p.currency||(price?'IDR':'')).toUpperCase();
@@ -400,10 +404,21 @@ function fetchJson_(url,referer){
   }
   return null;
 }
-function summaryData_(canonical,id){
-  const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'];
+function summaryData_(canonical,id,contextUrl){
+  let pickupPointCode='';
+  try{
+    pickupPointCode=new URL(String(contextUrl||canonical)).searchParams.get('pickupPointCode')||'';
+  }catch(e){}
+
+  const itemSuffix=pickupPointCode?'?pickupPointCode='+encodeURIComponent(pickupPointCode):'';
+  const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'+itemSuffix];
+
   const productSku=id.replace(/-\d{5}$/,'');
-  if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
+  if(productSku!==id){
+    let productUrl='https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false';
+    if(pickupPointCode)productUrl+='&pickupPointCode='+encodeURIComponent(pickupPointCode);
+    endpoints.push(productUrl);
+  }
 
   let title='',images=[],price='',currency='',description='';
   endpoints.forEach(function(u){
@@ -423,7 +438,8 @@ function summaryData_(canonical,id){
     }
     images=images.concat(current);
 
-    const priceData=extractSummaryPrice_(data);
+    let priceData=extractSummaryPrice_(data);
+    if(!priceData.price)priceData=extractSerializedPrice_(JSON.stringify(data));
     if(priceData.price){
       price=priceData.price;
       currency=priceData.currency||currency||'IDR';
@@ -510,10 +526,21 @@ function normalizePrice_(value){
     return isFinite(value)&&value>0?String(Math.round(value)):'';
   }
 
-  const text=String(value).trim();
+  let text=String(value).trim().replace(/^Rp\s*/i,'').replace(/\s+/g,'');
   if(!text)return '';
 
-  // Blibli commonly returns Indonesian formatted values such as "19.900".
+  // Indonesian thousands format: 15.900 / 1.299.000.
+  if(/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(text)){
+    const numeric=Number(text.replace(/\./g,'').replace(',','.'));
+    return isFinite(numeric)&&numeric>0?String(Math.round(numeric)):'';
+  }
+
+  // API numeric strings such as 15900 or 15900.0.
+  if(/^\d+(?:\.\d+)?$/.test(text)){
+    const numeric=Number(text);
+    return isFinite(numeric)&&numeric>0?String(Math.round(numeric)):'';
+  }
+
   const digits=text.replace(/[^0-9]/g,'');
   if(!digits)return '';
   const numeric=Number(digits);
@@ -575,6 +602,26 @@ function extractSummaryPrice_(value){
   });
 
   return {price:candidates[0].price,currency:currency||'IDR'};
+}
+function extractSerializedPrice_(text){
+  const value=decodeHtml_(text||'');
+  const raw=pick_(value,[
+    /"(?:finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice|price)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
+    /"(?:formattedPrice|formattedValue|displayPrice|priceDisplay)"\s*:\s*"Rp\s*([0-9][0-9.,]*)"/i,
+    /"amount"\s*:\s*"?([0-9][0-9.,]*)"?\s*,\s*"currency"\s*:\s*"IDR"/i
+  ]);
+  return {price:normalizePrice_(raw),currency:raw?'IDR':''};
+}
+function extractHtmlPrice_(html){
+  const value=decodeHtml_(html||'');
+  let raw=pick_(value,[
+    /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
+    /"(?:finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
+    /"(?:formattedPrice|formattedValue|displayPrice|priceDisplay)"\s*:\s*"Rp\s*([0-9][0-9.,]*)"/i,
+    /(?:^|[>\s])Rp\s*([0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?)(?:[<\s]|$)/i
+  ]);
+  if(!raw)raw=pick_(value,[/"price"\s*:\s*"?([0-9][0-9.,]*)"?/i]);
+  return normalizePrice_(raw);
 }
 function normalizeImage_(s){
   if(!s)return '';
