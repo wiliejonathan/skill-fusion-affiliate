@@ -7,8 +7,11 @@ export async function requestAppsScript(action:string, payload:Record<string,unk
   try{
     const url=new URL(APPS_SCRIPT_URL);
     let options:RequestInit={signal:controller.signal,redirect:"follow",credentials:"omit"};
-    if(action==="catalog"||action==="health"){
+    if(action==="catalog"||action==="health"||action==="price"){
       url.searchParams.set("action",action);
+      Object.entries(payload).forEach(([name,value])=>{
+        if(value!==undefined&&value!==null) url.searchParams.set(name,String(value));
+      });
       url.searchParams.set("ts",String(Date.now()));
     }else{
       options={...options,method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({...payload,action,key})};
