@@ -165,6 +165,14 @@ function dbToLocal(products:DbProduct[]){
   return {catalog,resolved};
 }
 
+function validBlibliSource(...candidates:(string|null|undefined)[]){
+  for(const candidate of candidates){
+    const value=String(candidate||"").trim();
+    if(/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value)) return value;
+  }
+  return "";
+}
+
 export default function AdminPage(){
   const [text,setText]=useState("");
   const [authReady,setAuthReady]=useState(false);
@@ -490,7 +498,11 @@ export default function AdminPage(){
 
     const item=catalog.find(x=>x.affiliateUrl===url);
     const previous=resolved[url];
-    const source=item?.canonicalUrl||previous?.canonicalUrl||url||"";
+    const source=validBlibliSource(item?.canonicalUrl,previous?.canonicalUrl,url,item?.affiliateUrl);
+    if(!source){
+      setProductNotice(prev=>({...prev,[url]:"Reload DOM gagal: URL Blibli produk tidak tersedia. Gunakan link affiliate/canonical Blibli yang valid."}));
+      return;
+    }
 
     setReloadingUrl(url);
     setProductNotice(prev=>({...prev,[url]:"Reload DOM Blibli sedang berjalan..."}));
@@ -567,7 +579,12 @@ export default function AdminPage(){
         if(!url) continue;
 
         const previous=nextResolved[url];
-        const source=item.canonicalUrl||previous?.canonicalUrl||url;
+        const source=validBlibliSource(item.canonicalUrl,previous?.canonicalUrl,url,item.affiliateUrl);
+        if(!source){
+          failed++;
+          setProductNotice(prev=>({...prev,[url]:"Reload DOM gagal: URL Blibli produk tidak tersedia."}));
+          continue;
+        }
         setNotice(`Reload All · membaca DOM Blibli ${index+1}/${catalog.length}...`);
 
         try{
