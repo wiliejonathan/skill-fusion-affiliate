@@ -9,6 +9,8 @@ export type Product={
   canonicalProductId:string;
   badge:string;
   features:string[];
+  price?:string|null;
+  currency?:string|null;
 };
 
 export const categories=["Semua","Charging & Cable"];
