@@ -1,6 +1,15 @@
 import {requestAppsScript} from "../../shared/apps-script";
 
 let adminKey:string|undefined;
+
+function clearAdminKey(){
+  adminKey=undefined;
+  window.sessionStorage.removeItem("skillfusion:admin-key");
+  // Remove the legacy key as well. A stale value here previously caused Admin
+  // to keep retrying an invalid password and fall back to the 1-product seed.
+  window.localStorage.removeItem("skillfusion:adminKey");
+}
+
 function getKey(){
   adminKey=adminKey||window.sessionStorage.getItem("skillfusion:admin-key")||window.localStorage.getItem("skillfusion:adminKey")||undefined;
   if(!adminKey){
@@ -23,11 +32,19 @@ export async function backendFetch(input:string,init:RequestInit={}){
     action=url.pathname==="/api/resolve"?"resolve":"reloadDom";
     payload={url:url.searchParams.get("url")};
   }else throw new Error("API tidak dikenal");
+
   try{
     const data=await requestAppsScript(action,payload,getKey());
     return {ok:true,json:async()=>data};
   }catch(error){
-    if(!window.sessionStorage.getItem("skillfusion:admin-key")) adminKey=undefined;
+    // requestAppsScript removes the session key specifically on UNAUTHORIZED.
+    // When that happens, also purge the legacy localStorage key and retry once
+    // so the user can immediately enter the current Config.ADMIN_KEY.
+    if(!window.sessionStorage.getItem("skillfusion:admin-key")){
+      clearAdminKey();
+      const data=await requestAppsScript(action,payload,getKey());
+      return {ok:true,json:async()=>data};
+    }
     throw error;
   }
 }
