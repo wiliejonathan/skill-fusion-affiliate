@@ -5,6 +5,18 @@ const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
 const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source'];
 
+const PRODUCT_FETCH_UAS = [
+  'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/143 Safari/537.36',
+  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/143 Mobile Safari/537.36',
+  'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+];
+
+const OFFICIAL_FALLBACK_PAGES = {
+  'XIO-60022-01141-00001':'https://www.mi.co.id/id/product/xiaomi-6a-type-a-to-type-c-cable/',
+  'ACO-60021-00234-00001':'https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c'
+};
+
 // Public reads only. Admin credentials and mutations are accepted exclusively in POST bodies.
 function doGet(e){
   const p=(e&&e.parameter)||{};
@@ -169,7 +181,14 @@ function reloadFromBlibli_(p){
   if(isUsableProductTitle_(summary.title))title=summary.title;
   gathered=gathered.concat(summary.images);
   const gallery=rankProductImages_(gathered,id).slice(0,40);
-  const finalGallery=gallery.length?gallery:(p.images||[]);
+  let finalGallery=gallery.length?gallery:(p.images||[]);
+  // Some Blibli product pages expose only one server-side image even though the
+  // exact product has a larger gallery. For those known SKUs only, enrich from
+  // the manufacturer's official page instead of leaving Admin/Client at 1 photo.
+  if(finalGallery.length<4){
+    const official=officialFallbackImages_(id);
+    if(official.length>finalGallery.length)finalGallery=official;
+  }
   const price=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i])||p.price||'';
   const currency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||p.currency||'';
   if(!isUsableProductTitle_(title))title=p.name;
@@ -197,8 +216,42 @@ function absoluteUrl_(base,loc){
   const path=(m[2]||'/').split('?')[0].replace(/[^/]*$/,'');
   return m[1]+path+loc;
 }
-function fetchText_(url){try{return UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}}).getContentText()}catch(e){return ''}}
-function fetchJson_(url,referer){try{const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{Accept:'application/json,text/plain,*/*',Referer:referer||''}});if(r.getResponseCode()<200||r.getResponseCode()>=300)return null;return JSON.parse(r.getContentText())}catch(e){return null}}
+function fetchText_(url){
+  for(let i=0;i<PRODUCT_FETCH_UAS.length;i++){
+    try{
+      const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{
+        Accept:'text/html,application/xhtml+xml',
+        'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+        'Cache-Control':'no-cache',
+        Pragma:'no-cache',
+        'User-Agent':PRODUCT_FETCH_UAS[i]
+      }});
+      if(r.getResponseCode()>=200&&r.getResponseCode()<400){
+        const body=r.getContentText();
+        if(body)return body;
+      }
+    }catch(e){}
+  }
+  return '';
+}
+function fetchJson_(url,referer){
+  for(let i=0;i<PRODUCT_FETCH_UAS.length;i++){
+    try{
+      const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{
+        Accept:'application/json,text/plain,*/*',
+        'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+        'Cache-Control':'no-cache',
+        Pragma:'no-cache',
+        Referer:referer||'',
+        'User-Agent':PRODUCT_FETCH_UAS[i]
+      }});
+      if(r.getResponseCode()<200||r.getResponseCode()>=300)continue;
+      const body=r.getContentText();
+      if(body)return JSON.parse(body);
+    }catch(e){}
+  }
+  return null;
+}
 function summaryData_(canonical,id){
   const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'];
   const productSku=id.replace(/-\d{5}$/,'');if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
@@ -272,6 +325,20 @@ function rankProductImages_(images,id){
   });
   rows.sort((a,b)=>b.score-a.score||a.index-b.index);
   return rows.map(x=>x.url);
+}
+function officialFallbackImages_(id){
+  const page=OFFICIAL_FALLBACK_PAGES[id];
+  if(!page)return [];
+  const html=fetchText_(page);
+  if(!html)return [];
+  const n=decodeHtml_(html),out=[];
+  const patterns=[
+    /https:\/\/(?:www\.)?acmic\.id\/cdn\/shop\/files\/[^"'\\\s<>]+/ig,
+    /https:\/\/cdn\.shopify\.com\/s\/files\/[^"'\\\s<>]+/ig,
+    /https:\/\/i02\.appmifile\.com\/[^"'\\\s<>]+/ig
+  ];
+  patterns.forEach(regex=>(n.match(regex)||[]).forEach(url=>out.push(url)));
+  return rankProductImages_(out,id).slice(0,20);
 }
 
 function productId_(url){const m=String(url||'').match(/\/is--([^/?#]+)/i);return m?m[1]:''}
