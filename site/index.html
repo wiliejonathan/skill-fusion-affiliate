@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#08111f">
+  <title>Skill Fusion — Smart Tech Affiliate</title>
+  <meta name="description" content="Kurasi gadget, smart technology, smartphone, dan aksesori pilihan Skill Fusion.">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="top-rail"><span class="pulse"></span><span>SKILL FUSION // SMART TECH CATALOG</span><a href="./admin.html">ADMIN</a></div>
+  <header class="site-header">
+    <a class="brand" href="./"><span class="brand-mark">SF</span><span><strong>Skill Fusion</strong><small>TECH AFFILIATE</small></span></a>
+    <div class="header-tools">
+      <label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Cari produk, brand, fitur..."></label>
+      <select id="brandFilter"><option value="">Semua brand</option></select>
+    </div>
+  </header>
+
+  <main class="client-main">
+    <section class="hero">
+      <div>
+        <span class="eyebrow">CURATED BY SKILL FUSION</span>
+        <h1>Smart tech yang layak masuk setup kamu.</h1>
+        <p>Katalog affiliate berisi gadget, kabel, charger, smartphone, aksesori, dan teknologi pilihan. Harga serta stok final mengikuti Blibli.</p>
+      </div>
+      <div class="hero-stat"><small>CATALOG STATUS</small><strong id="productCount">—</strong><span>produk aktif</span></div>
+    </section>
+
+    <div id="sourceBanner" class="source-banner hidden"></div>
+    <section id="productGrid" class="product-grid" aria-live="polite"></section>
+    <div id="emptyState" class="empty-state hidden">Tidak ada produk yang cocok dengan filter ini.</div>
+  </main>
+
+  <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="Galeri produk">
+    <button id="viewerClose" class="viewer-close" aria-label="Tutup">×</button>
+    <button id="viewerPrev" class="viewer-arrow prev" aria-label="Sebelumnya">‹</button>
+    <img id="viewerImage" alt="">
+    <button id="viewerNext" class="viewer-arrow next" aria-label="Berikutnya">›</button>
+    <div id="viewerCount" class="viewer-count"></div>
+  </div>
+
+  <footer><span>SKILL FUSION</span><span>GitHub Pages + Google Sheets + Apps Script</span></footer>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
