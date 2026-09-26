@@ -136,6 +136,8 @@ export default function AdminPage(){
   const [hydrated,setHydrated]=useState(false);
   const [serverReady,setServerReady]=useState(false);
   const [refreshingUrl,setRefreshingUrl]=useState<string|null>(null);
+  const [reloadingUrl,setReloadingUrl]=useState<string|null>(null);
+  const [bulkAction,setBulkAction]=useState<null|"refresh"|"reload">(null);
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
 
   async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
@@ -385,40 +387,46 @@ export default function AdminPage(){
     }
   }
 
-  async function refreshProduct(url:string){
-    if(refreshingUrl) return;
+  async function pushSingleProduct(url:string,nextCatalog:CatalogIdentity[]=catalog,nextResolved:Record<string,ResolvedProduct>=resolved){
+    const product=buildDbProducts(nextCatalog,nextResolved).find(row=>row.affiliateUrl===url);
+    if(!product) throw new Error("Data produk Admin belum lengkap");
 
-    const item=catalog.find(x=>x.affiliateUrl===url);
-    const previous=resolved[url];
-    const source=item?.canonicalUrl||previous?.canonicalUrl||url||"";
+    const res=await fetch("/api/catalog",{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({product})
+    });
+    const data=await res.json();
+    if(!res.ok||!data?.ok||!Array.isArray(data.products)){
+      throw new Error(data?.message||"Database sync gagal");
+    }
+    setServerReady(true);
+    return data.products as DbProduct[];
+  }
 
-    setRefreshingUrl(url);
-    setProductNotice(prev=>({...prev,[url]:"Mengambil ulang data produk..."}));
+  function mergeReloadedProduct(
+    url:string,
+    data:ResolvedProduct,
+    baseCatalog:CatalogIdentity[],
+    baseResolved:Record<string,ResolvedProduct>
+  ){
+    const item=baseCatalog.find(x=>x.affiliateUrl===url);
+    const previous=baseResolved[url];
 
-    try{
-      const res=await fetch(
-        "/api/resolve?url="+encodeURIComponent(source)+"&refresh="+Date.now(),
-        {cache:"no-store"}
-      );
-      const data:ResolvedProduct=await res.json();
+    const merged:ResolvedProduct={
+      ...previous,
+      ...data,
+      inputUrl:url,
+      title:data.title||previous?.title||"Produk Blibli",
+      canonicalUrl:data.canonicalUrl||previous?.canonicalUrl||item?.canonicalUrl||null,
+      canonicalProductId:data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null,
+      image:data.images?.[0]||data.image||previous?.images?.[0]||previous?.image||null,
+      images:data.images?.length?data.images:(previous?.images||[])
+    };
 
-      if(!res.ok||!data?.ok){
-        throw new Error(data?.message||"Resolver gagal");
-      }
-
-      const merged:ResolvedProduct={
-        ...previous,
-        ...data,
-        inputUrl:url,
-        title:data.title||previous?.title||"Produk Blibli",
-        canonicalUrl:data.canonicalUrl||previous?.canonicalUrl||item?.canonicalUrl||null,
-        canonicalProductId:data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null,
-        image:data.image||data.images?.[0]||previous?.image||previous?.images?.[0]||null,
-        images:data.images?.length?data.images:(previous?.images||[])
-      };
-
-      const nextResolved={...resolved,[url]:merged};
-      const nextCatalog=catalog.map(row=>
+    return {
+      resolved:{...baseResolved,[url]:merged},
+      catalog:baseCatalog.map(row=>
         row.affiliateUrl===url
           ? {
               ...row,
@@ -426,24 +434,29 @@ export default function AdminPage(){
               canonicalUrl:merged.canonicalUrl||row.canonicalUrl
             }
           : row
-      );
+      ),
+      merged
+    };
+  }
 
-      setResolved(nextResolved);
-      setCatalog(nextCatalog);
+  async function refreshProduct(url:string){
+    if(refreshingUrl||reloadingUrl||bulkAction) return;
 
-      const synced=await pushDatabase(nextCatalog,nextResolved);
-      if(!synced) throw new Error("Database sync gagal");
+    setRefreshingUrl(url);
+    setProductNotice(prev=>({...prev,[url]:"Mengirim ulang data Admin ke Client..."}));
 
+    try{
+      const synced=await pushSingleProduct(url);
       const local=dbToLocal(synced);
       setCatalog(local.catalog);
       setResolved(local.resolved);
 
-      const refreshed=local.resolved[url]||merged;
+      const refreshed=local.resolved[url]||resolved[url];
       setProductNotice(prev=>({
         ...prev,
-        [url]:refreshed.images?.length
-          ? `✓ Refresh selesai · ${refreshed.images.length} foto · sudah sync ke Client`
-          : "✓ Refresh selesai · data sudah sync ke Client"
+        [url]:refreshed?.images?.length
+          ? `✓ Refresh Data selesai · ${refreshed.images.length} foto · Admin → Client`
+          : "✓ Refresh Data selesai · Admin → Client"
       }));
     }catch(error){
       setProductNotice(prev=>({
@@ -452,6 +465,123 @@ export default function AdminPage(){
       }));
     }finally{
       setRefreshingUrl(null);
+    }
+  }
+
+  async function reloadDomProduct(url:string){
+    if(refreshingUrl||reloadingUrl||bulkAction) return;
+
+    const item=catalog.find(x=>x.affiliateUrl===url);
+    const previous=resolved[url];
+    const source=item?.canonicalUrl||previous?.canonicalUrl||url||"";
+
+    setReloadingUrl(url);
+    setProductNotice(prev=>({...prev,[url]:"Reload DOM Blibli sedang berjalan..."}));
+
+    try{
+      const res=await fetch(
+        "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now(),
+        {cache:"no-store"}
+      );
+      const data:ResolvedProduct=await res.json();
+
+      if(!res.ok||!data?.ok){
+        throw new Error(data?.message||"Reload DOM gagal");
+      }
+
+      const next=mergeReloadedProduct(url,data,catalog,resolved);
+      setCatalog(next.catalog);
+      setResolved(next.resolved);
+
+      setProductNotice(prev=>({
+        ...prev,
+        [url]:`✓ Reload DOM selesai · ${next.merged.images?.length||0} foto di Admin · tekan Refresh Data untuk kirim ke Client`
+      }));
+    }catch(error){
+      setProductNotice(prev=>({
+        ...prev,
+        [url]:"Reload DOM gagal: "+(error instanceof Error?error.message:"coba lagi")
+      }));
+    }finally{
+      setReloadingUrl(null);
+    }
+  }
+
+  async function refreshDataAll(){
+    if(bulkAction||refreshingUrl||reloadingUrl) return;
+
+    setBulkAction("refresh");
+    setNotice("Refresh Data All · mengirim seluruh data Admin ke Client...");
+
+    try{
+      const synced=await pushDatabase(catalog,resolved);
+      if(!synced) throw new Error("Database sync gagal");
+
+      const local=dbToLocal(synced);
+      setCatalog(local.catalog);
+      setResolved(local.resolved);
+      setNotice(`✓ Refresh Data All selesai · ${synced.length} produk Admin sudah dikirim ke Client.`);
+    }catch(error){
+      setNotice("Refresh Data All gagal: "+(error instanceof Error?error.message:"coba lagi"));
+    }finally{
+      setBulkAction(null);
+    }
+  }
+
+  async function reloadAll(){
+    if(bulkAction||refreshingUrl||reloadingUrl) return;
+
+    setBulkAction("reload");
+    let nextCatalog=[...catalog];
+    let nextResolved={...resolved};
+    let success=0;
+    let failed=0;
+
+    try{
+      for(let index=0;index<catalog.length;index++){
+        const item=catalog[index];
+        const url=item.affiliateUrl||"";
+        if(!url) continue;
+
+        const previous=nextResolved[url];
+        const source=item.canonicalUrl||previous?.canonicalUrl||url;
+        setNotice(`Reload All · membaca DOM Blibli ${index+1}/${catalog.length}...`);
+
+        try{
+          const res=await fetch(
+            "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now()+"-"+index,
+            {cache:"no-store"}
+          );
+          const data:ResolvedProduct=await res.json();
+          if(!res.ok||!data?.ok) throw new Error(data?.message||"Reload DOM gagal");
+
+          const next=mergeReloadedProduct(url,data,nextCatalog,nextResolved);
+          nextCatalog=next.catalog;
+          nextResolved=next.resolved;
+          success++;
+
+          setProductNotice(prev=>({
+            ...prev,
+            [url]:`✓ Reload DOM · ${next.merged.images?.length||0} foto di Admin`
+          }));
+        }catch(error){
+          failed++;
+          setProductNotice(prev=>({
+            ...prev,
+            [url]:"Reload DOM gagal: "+(error instanceof Error?error.message:"coba lagi")
+          }));
+        }
+      }
+
+      setCatalog(nextCatalog);
+      setResolved(nextResolved);
+      setNotice(
+        failed
+          ? `Reload All selesai · ${success} berhasil, ${failed} gagal. Data masih di Admin; gunakan Refresh Data All untuk kirim ke Client.`
+          : `✓ Reload All selesai · ${success} produk dibaca ulang dari DOM Blibli. Gunakan Refresh Data All untuk kirim ke Client.`
+      );
+    }finally{
+      setBulkAction(null);
     }
   }
 
@@ -486,7 +616,27 @@ export default function AdminPage(){
     <section className="content">
       <header id="dashboard">
         <div><span className="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Kelola produk Blibli yang benar-benar kamu masukkan. Tidak ada produk demo.</p></div>
-        <div className="pill">ADMIN</div>
+        <div className="header-controls">
+          <div className="dashboard-actions">
+            <button
+              className="dashboard-action refresh-all"
+              onClick={refreshDataAll}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null}
+            >
+              <RefreshCw size={16}/>
+              {bulkAction==="refresh"?"Refreshing All...":"Refresh Data All"}
+            </button>
+            <button
+              className="dashboard-action reload-all"
+              onClick={reloadAll}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null}
+            >
+              <PackageSearch size={16}/>
+              {bulkAction==="reload"?"Reloading All...":"Reload All"}
+            </button>
+          </div>
+          <div className="pill">ADMIN</div>
+        </div>
       </header>
 
       <div className="stats">
@@ -532,21 +682,29 @@ export default function AdminPage(){
                 {meta?.images?.length?<div className="admin-gallery">
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
                 </div>:null}
-                {meta?.images?.length?<small>{meta.images.length} foto produk berhasil ditemukan</small>:<small>Foto belum terbaca — gunakan Refresh Data</small>}
+                {meta?.images?.length?<small>{meta.images.length} foto produk berhasil ditemukan</small>:<small>Foto belum terbaca — gunakan Reload DOM</small>}
                 {meta?.price?<b>{meta.currency==="IDR"?"Rp ":""}{meta.price}</b>:<b>Harga mengikuti Blibli</b>}
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
                   <button
+                    className={reloadingUrl===url?"reload-dom-btn refreshing":"reload-dom-btn"}
+                    onClick={()=>reloadDomProduct(url)}
+                    disabled={refreshingUrl!==null||reloadingUrl!==null||bulkAction!==null}
+                  >
+                    <PackageSearch size={15}/>
+                    {reloadingUrl===url?"Reloading DOM...":"Reload DOM"}
+                  </button>
+                  <button
                     className={refreshingUrl===url?"refresh-btn refreshing":"refresh-btn"}
                     onClick={()=>refreshProduct(url)}
-                    disabled={refreshingUrl!==null}
+                    disabled={refreshingUrl!==null||reloadingUrl!==null||bulkAction!==null}
                   >
                     <RefreshCw size={15}/>
                     {refreshingUrl===url?"Refreshing...":"Refresh Data"}
                   </button>
-                  <button onClick={()=>removeLink(url)} disabled={refreshingUrl===url}><Trash2 size={15}/>Hapus</button>
+                  <button onClick={()=>removeLink(url)} disabled={refreshingUrl===url||reloadingUrl===url||bulkAction!==null}><Trash2 size={15}/>Hapus</button>
                 </div>
-                {productNotice[url]?<div className={productNotice[url].startsWith("Refresh gagal")?"product-refresh-status error":"product-refresh-status"}>{productNotice[url]}</div>:null}
+                {productNotice[url]?<div className={productNotice[url].includes("gagal")?"product-refresh-status error":"product-refresh-status"}>{productNotice[url]}</div>:null}
               </div>
             </article>
           })}
