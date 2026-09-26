@@ -134,6 +134,12 @@ function sanitizeProductImages(images:string[]){
   return out;
 }
 
+function sanitizeBlibliGallery(images:string[]){
+  return sanitizeProductImages(images).filter(url=>
+    /^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(url)
+  );
+}
+
 function dbToLocal(products:DbProduct[]){
   const catalog:CatalogIdentity[]=products.map(p=>({
     sequence:p.sequence,
