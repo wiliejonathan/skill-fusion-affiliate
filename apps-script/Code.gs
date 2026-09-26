@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:3,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:4,time:new Date().toISOString()};
     else if(action==='catalog') out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
     else if(action==='price') out=publicPrice_(String(p.id||''));
     else throw new Error('Operasi Admin wajib menggunakan POST');
@@ -447,6 +447,55 @@ function fetchJson_(url,referer){
   }
   return null;
 }
+function fetchJsonFast_(url,referer){
+  const uas=[PRODUCT_FETCH_UAS[0],PRODUCT_FETCH_UAS[1]];
+  for(let i=0;i<uas.length;i++){
+    try{
+      const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{
+        Accept:'application/json,text/plain,*/*',
+        'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+        'Cache-Control':'no-cache',
+        Pragma:'no-cache',
+        Referer:referer||'https://www.blibli.com/',
+        'User-Agent':uas[i]
+      }});
+      if(r.getResponseCode()<200||r.getResponseCode()>=300)continue;
+      const body=r.getContentText();
+      if(body)return JSON.parse(body);
+    }catch(e){}
+  }
+  return null;
+}
+function fastSummaryPrice_(p){
+  const id=String(p&&p.id||'').trim();
+  if(!id)return {price:'',currency:''};
+
+  const referer=String(p.canonicalUrl||p.affiliateUrl||'https://www.blibli.com/');
+  const endpoints=[
+    'https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'
+  ];
+
+  const productSku=id.replace(/-\d{5}$/,'');
+  if(productSku!==id){
+    endpoints.push(
+      'https://www.blibli.com/backend/product-detail/products/ps--'+
+      encodeURIComponent(productSku)+
+      '/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false'
+    );
+  }
+
+  for(let i=0;i<endpoints.length;i++){
+    const payload=fetchJsonFast_(endpoints[i],referer);
+    if(!payload)continue;
+    const data=payload.data||payload;
+    let priceData=extractSummaryPrice_(data);
+    if(!priceData.price)priceData=extractSerializedPrice_(JSON.stringify(data));
+    const price=normalizePrice_(priceData.price);
+    if(price)return {price:price,currency:priceData.currency||'IDR'};
+  }
+
+  return {price:'',currency:''};
+}
 function summaryData_(canonical,id,contextUrl){
   let pickupPointCode='';
   try{
@@ -594,18 +643,22 @@ function extractSummaryPrice_(value){
   let currency='';
 
   const priority={
-    finalprice:120,
-    saleprice:115,
-    sellingprice:112,
-    offerprice:110,
-    discountedprice:108,
-    currentprice:106,
-    itemprice:104,
-    price:100,
-    minprice:80,
-    originalprice:20,
-    strikeprice:15,
-    strikethroughprice:15
+    // Blibli product-detail _summary commonly exposes the visible sell price as
+    // data.price.listed. Prefer that exact field before generic fallbacks.
+    listed:160,
+    listedprice:158,
+    finalprice:150,
+    saleprice:145,
+    sellingprice:142,
+    offerprice:140,
+    discountedprice:138,
+    currentprice:136,
+    itemprice:134,
+    price:120,
+    minprice:90,
+    originalprice:25,
+    strikeprice:20,
+    strikethroughprice:20
   };
 
   function visit(node,keyHint){
@@ -649,7 +702,7 @@ function extractSummaryPrice_(value){
 function extractSerializedPrice_(text){
   const value=decodeHtml_(text||'');
   const raw=pick_(value,[
-    /"(?:finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice|price)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
+    /"(?:listed|listedPrice|finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice|price)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
     /"(?:formattedPrice|formattedValue|displayPrice|priceDisplay)"\s*:\s*"Rp\s*([0-9][0-9.,]*)"/i,
     /"amount"\s*:\s*"?([0-9][0-9.,]*)"?\s*,\s*"currency"\s*:\s*"IDR"/i
   ]);
@@ -705,7 +758,7 @@ function searchPriceData_(id,title,referer){
 
   for(let i=0;i<terms.length;i++){
     const endpoint='https://www.blibli.com/backend/search/products?searchTerm='+encodeURIComponent(terms[i])+'&start=0&itemPerPage=24';
-    const payload=fetchJson_(endpoint,referer||'https://www.blibli.com/');
+    const payload=fetchJsonFast_(endpoint,referer||'https://www.blibli.com/');
     if(!payload)continue;
     visit(payload);
     if(candidates.some(function(row){return row.score>=300}))break;
@@ -721,13 +774,13 @@ function searchPriceData_(id,title,referer){
 function refreshPriceForProduct_(p){
   if(!p||!p.id)return p;
 
-  // Cheapest path first: Blibli search normally exposes sell price in one request.
-  let priceData=searchPriceData_(p.id,p.name,p.canonicalUrl||p.affiliateUrl);
+  // Fast path: exact SKU _summary. This avoids searching the full Blibli
+  // catalogue and reads the same price object used by the product page.
+  let priceData=fastSummaryPrice_(p);
 
-  // Fall back to product summary only when search is unavailable.
+  // Fallback only if exact SKU summary does not expose a price.
   if(!priceData.price){
-    const summary=summaryData_(p.canonicalUrl||p.affiliateUrl,p.id,p.canonicalUrl||p.affiliateUrl);
-    priceData={price:summary.price||'',currency:summary.currency||''};
+    priceData=searchPriceData_(p.id,p.name,p.canonicalUrl||p.affiliateUrl);
   }
 
   // Final fallback: PDP HTML.
@@ -764,7 +817,7 @@ function publicPrice_(id){
   if(cache.get(throttleKey)){
     return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
   }
-  cache.put(throttleKey,'1',300);
+  cache.put(throttleKey,'1',20);
 
   const lock=LockService.getScriptLock();
   if(!lock.tryLock(1500)){
@@ -777,6 +830,10 @@ function publicPrice_(id){
       upsert_(DRAFT_SHEET,fresh);
       upsert_(PUBLISHED_SHEET,fresh);
       SpreadsheetApp.flush();
+    }else{
+      // A blocked/empty Blibli response should be retriable on the next visitor,
+      // not frozen for minutes.
+      cache.remove(throttleKey);
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
