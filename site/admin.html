@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#08111f">
+  <title>Skill Fusion Admin</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="admin-page">
+  <aside class="admin-sidebar">
+    <a class="brand" href="./"><span class="brand-mark">SF</span><span><strong>Skill Fusion</strong><small>ADMIN</small></span></a>
+    <nav>
+      <a class="active" href="#dashboard">Dashboard</a>
+      <a href="#settings">Connection</a>
+      <a href="#products">Products</a>
+      <a href="./">Client Website</a>
+    </nav>
+    <div class="sidebar-note">Draft dan Published dipisahkan. Reload tidak langsung mengubah Client.</div>
+  </aside>
+
+  <main class="admin-main">
+    <header id="dashboard" class="admin-header">
+      <div><span class="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Google Sheets menjadi database. Apps Script menjadi API. GitHub Pages menjadi website.</p></div>
+      <div class="dashboard-actions">
+        <button id="refreshAllBtn" class="btn secondary">↻ Refresh Data All</button>
+        <button id="reloadAllBtn" class="btn primary">⟳ Reload All</button>
+      </div>
+    </header>
+
+    <section class="stats">
+      <article><span>Draft</span><strong id="draftCount">—</strong><small>produk di Admin</small></article>
+      <article><span>Published</span><strong id="publishedCount">—</strong><small>produk di Client</small></article>
+      <article><span>API</span><strong id="apiStatus">OFF</strong><small>Apps Script</small></article>
+      <article><span>Database</span><strong>SHEETS</strong><small>Google Sheets</small></article>
+    </section>
+
+    <section id="settings" class="panel">
+      <div class="panel-title"><div><span class="eyebrow">CONNECTION</span><h2>Google Apps Script Web App</h2><p>URL dan admin key disimpan hanya di browser perangkat ini.</p></div></div>
+      <div class="settings-grid">
+        <label><span>Apps Script Web App URL</span><input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label>
+        <label><span>Admin Key</span><input id="adminKeyInput" type="password" placeholder="Ambil dari tab Config di Google Sheet"></label>
+      </div>
+      <div class="settings-actions">
+        <button id="saveConnectionBtn" class="btn primary">Simpan Connection</button>
+        <button id="testConnectionBtn" class="btn secondary">Test API</button>
+        <a class="btn ghost" target="_blank" rel="noreferrer" href="https://docs.google.com/spreadsheets/d/1V3LTciKM0AAXQAbdk-1eNk6Ie0aXL_ksvSDBzDVjUI0/edit">Buka Google Sheet</a>
+      </div>
+      <div id="setupNotice" class="notice"></div>
+    </section>
+
+    <section id="products" class="panel">
+      <div class="panel-title"><div><span class="eyebrow">PRODUCTS</span><h2>Katalog Draft</h2><p><b>Reload DOM</b> = Blibli → Draft. <b>Refresh Data</b> = Draft → Published/Client.</p></div></div>
+      <div id="adminProducts" class="admin-products"></div>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+  </main>
+
+  <script src="./config.js"></script>
+  <script src="./admin.js"></script>
+</body>
+</html>
