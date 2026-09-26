@@ -1,0 +1,149 @@
+const SHEET_ID = '1V3LTciKM0AAXQAbdk-1eNk6Ie0aXL_ksvSDBzDVjUI0';
+const DRAFT_SHEET = 'Draft';
+const PUBLISHED_SHEET = 'Published';
+const CONFIG_SHEET = 'Config';
+const LOG_SHEET = 'Logs';
+const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source'];
+
+function doGet(e){
+  const p=(e&&e.parameter)||{};
+  let out;
+  try{
+    const action=String(p.action||'catalog');
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',time:new Date().toISOString()};
+    else if(action==='catalog') out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
+    else{
+      requireAdmin_(p.key);
+      if(action==='draft') out={ok:true,products:readProducts_(DRAFT_SHEET)};
+      else if(action==='reload') out=reloadOne_(String(p.id||''));
+      else if(action==='reloadAll') out=reloadAll_();
+      else if(action==='publish') out=publishOne_(String(p.id||''));
+      else if(action==='publishAll') out=publishAll_();
+      else if(action==='delete') out=deleteOne_(String(p.id||''));
+      else throw new Error('Action tidak dikenal: '+action);
+    }
+  }catch(err){
+    out={ok:false,message:String(err&&err.message||err)};
+  }
+  return output_(out,p.callback);
+}
+
+function output_(obj,callback){
+  const json=JSON.stringify(obj);
+  if(callback){
+    return ContentService.createTextOutput(String(callback)+'('+json+');').setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+}
+
+function ss_(){return SpreadsheetApp.openById(SHEET_ID)}
+function sheet_(name){const s=ss_().getSheetByName(name);if(!s)throw new Error('Sheet '+name+' tidak ditemukan');return s}
+function config_(){
+  const values=sheet_(CONFIG_SHEET).getDataRange().getValues(),map={};
+  for(let i=1;i<values.length;i++){if(values[i][0])map[String(values[i][0])]=String(values[i][1]||'')}
+  return map;
+}
+function requireAdmin_(key){const expected=config_().ADMIN_KEY;if(!expected||String(key||'')!==expected)throw new Error('Admin key salah')}
+function log_(action,id,status,message){sheet_(LOG_SHEET).appendRow([new Date(),action,id||'',status,message||''])}
+
+function rowToProduct_(r){
+  let images=[],features=[];
+  try{images=JSON.parse(r[6]||'[]')}catch(e){}
+  try{features=JSON.parse(r[10]||'[]')}catch(e){}
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||'')};
+}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script']}
+function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
+function findRow_(name,id){const s=sheet_(name),v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
+function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
+function deleteFrom_(name,id){const s=sheet_(name),row=findRow_(name,id);if(row>0)s.deleteRow(row)}
+
+function reloadOne_(id){
+  if(!id)throw new Error('Product ID wajib diisi');
+  const current=readProducts_(DRAFT_SHEET).find(p=>p.id===id);
+  if(!current)throw new Error('Produk tidak ditemukan di Draft');
+  const next=reloadFromBlibli_(current);
+  upsert_(DRAFT_SHEET,next);
+  log_('RELOAD',id,'OK',next.images.length+' foto');
+  return {ok:true,product:next,message:'Reload DOM selesai · '+next.images.length+' foto tersimpan di Draft'};
+}
+function reloadAll_(){
+  const all=readProducts_(DRAFT_SHEET),errors=[],updated=[];
+  all.forEach(p=>{try{const n=reloadFromBlibli_(p);upsert_(DRAFT_SHEET,n);updated.push(n)}catch(e){errors.push(p.id+': '+e.message)}});
+  log_('RELOAD_ALL','ALL',errors.length?'PARTIAL':'OK',updated.length+' berhasil; '+errors.length+' gagal');
+  return {ok:true,count:updated.length,errors,message:'Reload All selesai · '+updated.length+' berhasil'+(errors.length?', '+errors.length+' gagal':'')};
+}
+function publishOne_(id){
+  const p=readProducts_(DRAFT_SHEET).find(x=>x.id===id);if(!p)throw new Error('Produk tidak ditemukan di Draft');
+  upsert_(PUBLISHED_SHEET,p);log_('PUBLISH',id,'OK',p.images.length+' foto');
+  return {ok:true,message:'Refresh Data selesai · Draft → Published/Client'};
+}
+function publishAll_(){
+  const draft=readProducts_(DRAFT_SHEET),s=sheet_(PUBLISHED_SHEET);if(s.getLastRow()>1)s.getRange(2,1,s.getLastRow()-1,HEADERS.length).clearContent();
+  if(draft.length)s.getRange(2,1,draft.length,HEADERS.length).setValues(draft.map(productToRow_));
+  log_('PUBLISH_ALL','ALL','OK',draft.length+' produk');
+  return {ok:true,count:draft.length,message:'Refresh Data All selesai · '+draft.length+' produk Published'};
+}
+function deleteOne_(id){deleteFrom_(DRAFT_SHEET,id);deleteFrom_(PUBLISHED_SHEET,id);log_('DELETE',id,'OK','Dihapus dari Draft & Published');return {ok:true,message:'Produk dihapus'}}
+
+function reloadFromBlibli_(p){
+  const start=p.canonicalUrl||p.affiliateUrl;
+  const resolved=resolveUrl_(start);
+  const canonical=(resolved.canonical||resolved.finalUrl||start).split('?')[0].replace(/\/$/,'');
+  const id=productId_(canonical)||p.id;
+  const html=fetchText_(canonical);
+  let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
+  const htmlImages=extractBlibliImages_(html);
+  let gathered=htmlImages.slice();
+  const summary=summaryData_(canonical,id);
+  if(summary.title)title=summary.title;
+  gathered=gathered.concat(summary.images);
+  gathered=unique_(gathered.map(normalizeImage_).filter(Boolean));
+  let gallery=bestGallery_(gathered);
+  const official=officialImages_(id);
+  if(official.length>gallery.length)gallery=official;
+  if((p.images||[]).length>gallery.length)gallery=p.images;
+  const price=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i])||p.price||'';
+  const currency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||p.currency||'';
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:gallery,price:price,currency:currency,source:'blibli-reload'});
+}
+function resolveUrl_(url){
+  let current=url,html='';
+  for(let i=0;i<6;i++){
+    const r=UrlFetchApp.fetch(current,{followRedirects:false,muteHttpExceptions:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}});
+    const code=r.getResponseCode(),h=r.getAllHeaders(),loc=h.Location||h.location;
+    if(code>=300&&code<400&&loc){current=String(loc).match(/^https?:/)?String(loc):new URL(String(loc),current).toString();continue}
+    html=r.getContentText();
+    break;
+  }
+  const c=pick_(html,[/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i]);
+  return {finalUrl:current,canonical:c||current};
+}
+function fetchText_(url){try{return UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}}).getContentText()}catch(e){return ''}}
+function fetchJson_(url,referer){try{const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{Accept:'application/json,text/plain,*/*',Referer:referer||''}});if(r.getResponseCode()<200||r.getResponseCode()>=300)return null;return JSON.parse(r.getContentText())}catch(e){return null}}
+function summaryData_(canonical,id){
+  const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'];
+  const productSku=id.replace(/-\d{5}$/,'');if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
+  let title='',images=[];
+  endpoints.forEach(u=>{const j=fetchJson_(u,canonical);if(!j)return;const data=j.data||j;if(data&&data.name)title=String(data.name);images=images.concat(extractBlibliImages_(JSON.stringify(data)))});
+  return {title:title,images:unique_(images)};
+}
+function normalizeImage_(s){if(!s)return '';return String(s).replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\\//g,'/').replace(/^\/\//,'https://').replace(/^http:\/\//i,'https://').replace('/images/catalog/thumbnail/','/images/catalog/full/')}
+function extractBlibliImages_(text){const n=String(text||'').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\\//g,'/');const m=n.match(/(?:https?:)?\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\\s<>]+/ig)||[];return unique_(m.map(normalizeImage_))}
+function bestGallery_(images){
+  const groups={};images.forEach(src=>{const m=String(src).match(/MTA-\d+/i);if(!m)return;const k=m[0].toUpperCase();groups[k]=groups[k]||[];if(groups[k].indexOf(src)<0)groups[k].push(src)});
+  const keys=Object.keys(groups).sort((a,b)=>groups[b].length-groups[a].length);return keys.length?groups[keys[0]].slice(0,40):unique_(images).slice(0,40)
+}
+function officialImages_(id){
+  const urls={
+    'XIO-60022-01141-00001':'https://www.mi.co.id/id/product/xiaomi-6a-type-a-to-type-c-cable/',
+    'ACO-60021-00234-00001':'https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c',
+    'ACO-60021-00122-00005':'https://acmic.id/products/acmic-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable'
+  };
+  if(!urls[id])return [];const h=fetchText_(urls[id]).replace(/\\u0026/ig,'&');const regex=/https:\/\/(?:acmic\.id\/cdn\/shop\/files|cdn\.shopify\.com\/s\/files|i02\.appmifile\.com)\/[^"'\\\s<>]+/ig;return unique_(h.match(regex)||[]).slice(0,30)
+}
+function productId_(url){const m=String(url||'').match(/\/is--([^/?#]+)/i);return m?m[1]:''}
+function pick_(text,patterns){for(let i=0;i<patterns.length;i++){const m=String(text||'').match(patterns[i]);if(m&&m[1])return String(m[1]).replace(/&amp;/g,'&').trim()}return ''}
+function unique_(arr){return Array.from(new Set((arr||[]).filter(Boolean)))}
+function inferBrand_(title,id){const u=String(title||'').toUpperCase();if(u.indexOf('XIAOMI')===0||String(id).indexOf('XIO-')===0)return 'XIAOMI';if(u.indexOf('ACMIC')===0||String(id).indexOf('ACO-')===0)return 'ACMIC';return String(title||'TECH').split(/\s+/)[0].toUpperCase()}
+function inferFeatures_(title){const v=String(title||'').toLowerCase(),f=[];if(/100\s*cm/.test(v))f.push('100 cm');if(/type\s*-?\s*c|usb\s*c/.test(v))f.push('USB Type-C');if(/power delivery|\bpd\b/.test(v))f.push('Power Delivery');else if(/fast\s*charging|6a/.test(v))f.push('Fast charging');return f.length?f:['Blibli Affiliate']}
