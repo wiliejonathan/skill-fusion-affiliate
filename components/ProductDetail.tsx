@@ -11,6 +11,10 @@ import {requestAppsScript} from "@/shared/apps-script";
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
 const IG_BRAND="https://www.instagram.com/skill.fusion.id/";
 
+function prevHasPrice(value:string|null|undefined){
+  return !!String(value||"").trim();
+}
+
 export default function ProductDetail({product}:{product:Product}){
   const [active,setActive]=useState(0);
   const [liked,setLiked]=useState(false);
@@ -36,18 +40,31 @@ export default function ProductDetail({product}:{product:Product}){
     let mounted=true;
     setLivePrice({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:true});
 
-    async function refreshLivePrice(){
+    async function refreshLivePrice(attempt=0){
       try{
         const data=await requestAppsScript("price",{id:product.id});
         if(!mounted)return;
+
+        const nextPrice=data?.price||product.price||null;
         setLivePrice({
-          price:data?.price||product.price||null,
+          price:nextPrice,
           currency:data?.currency||product.currency||null,
           updatedAt:data?.priceUpdatedAt||product.priceUpdatedAt||null,
           loading:false
         });
+
+        // Blibli occasionally returns an empty/blocked response on the first hit.
+        // Retry once after the short backend throttle instead of leaving the user
+        // staring at a permanent loading label.
+        if(!nextPrice&&attempt===0){
+          window.setTimeout(()=>{if(mounted) void refreshLivePrice(1)},2500);
+        }
       }catch{
-        if(mounted)setLivePrice(prev=>({...prev,loading:false}));
+        if(!mounted)return;
+        setLivePrice(prev=>({...prev,loading:false}));
+        if(!prevHasPrice(product.price)&&attempt===0){
+          window.setTimeout(()=>{if(mounted) void refreshLivePrice(1)},2500);
+        }
       }
     }
 
@@ -165,7 +182,15 @@ export default function ProductDetail({product}:{product:Product}){
           <div className="detail-price-box">
             <span>LIVE MARKET PRICE</span>
             <strong>{formattedPrice||"CHECK @ BLIBLI"}</strong>
-            <small>{livePrice.loading?"Memeriksa harga Blibli terbaru...":livePrice.updatedAt?"Live cache diperbarui "+new Date(livePrice.updatedAt).toLocaleString("id-ID"):"Harga, promo, varian, dan stok mengikuti halaman merchant."}</small>
+            <small>{
+              livePrice.loading
+                ? (formattedPrice?"Harga tersimpan ditampilkan · sinkronisasi Blibli berjalan...":"Mengambil harga Blibli terbaru...")
+                : livePrice.updatedAt
+                  ? "Harga diperbarui "+new Date(livePrice.updatedAt).toLocaleString("id-ID")
+                  : formattedPrice
+                    ? "Menampilkan harga tersimpan terakhir."
+                    : "Harga belum tersedia. Sistem akan mencoba lagi otomatis saat produk dikunjungi."
+            }</small>
           </div>
 
           <div className="detail-description">
