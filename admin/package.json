@@ -12,7 +12,9 @@
     "react": "latest",
     "react-dom": "latest",
     "lucide-react": "latest",
-    "@neondatabase/serverless": "latest"
+    "@neondatabase/serverless": "latest",
+    "@sparticuz/chromium": "latest",
+    "puppeteer-core": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
