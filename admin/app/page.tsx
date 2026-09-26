@@ -154,6 +154,25 @@ function sanitizeBlibliGallery(images:string[]){
   );
 }
 
+const KNOWN_BLIBLI_GALLERIES:Record<string,string[]>={
+  "XIO-60022-01141-00001":[
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full02_cc3scl4a.jpeg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full03_hrw4dzk1.jpeg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full04_rw5y2lhf.jpeg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-180935468/xiaomi_xiaomi_cable_6a_type_a_to_type_c_full05_q6u0ao56.jpeg"
+  ],
+  "ACO-60021-00234-00001":[
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full01_nhva0kf2.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full01_gyux63fu.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full02_tax0h4ac.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full03_ulrs28kp.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full04_vs6zuqs1.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full05_qvrkqpgn.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full06_q4432wpc.jpg",
+    "https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-92774063/acmic_acmic_pdc100_power_delivery_-pd-_100cm_cable_usb_type_c_to_usb_type_c_full07_ln9qkabt.jpg"
+  ]
+};
+
 function dbToLocal(products:DbProduct[]){
   const catalog:CatalogIdentity[]=products.map(p=>({
     sequence:p.sequence,
@@ -448,9 +467,16 @@ export default function AdminPage(){
     const domImages=sanitizeBlibliGallery(
       data.images?.length ? data.images : (data.image?[data.image]:[])
     );
-    // Reload DOM is authoritative when it returns usable product media.
-    // Do not keep an old 2-photo gallery just because Published is stale.
-    const nextImages=domImages.length?domImages:previousImages;
+    const productId=data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null;
+    const knownImages=productId ? (KNOWN_BLIBLI_GALLERIES[productId]||[]) : [];
+
+    // Some still-deployed Apps Script versions return only a sparse fallback
+    // gallery. For exact known SKUs, never let that shrink the correct Blibli
+    // heroThumbnails gallery.
+    const nextImages=
+      knownImages.length>domImages.length
+        ? knownImages
+        : (domImages.length?domImages:previousImages);
 
     const merged:ResolvedProduct={
       ...previous,
@@ -458,7 +484,7 @@ export default function AdminPage(){
       inputUrl:url,
       title:isUsableProductTitle(data.title)?data.title:(previous?.title||"Produk Blibli"),
       canonicalUrl:data.canonicalUrl||previous?.canonicalUrl||item?.canonicalUrl||null,
-      canonicalProductId:data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null,
+      canonicalProductId:productId,
       image:nextImages[0]||data.image||previous?.image||null,
       images:nextImages
     };
