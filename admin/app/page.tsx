@@ -38,7 +38,7 @@ const initialCatalog:CatalogIdentity[]=[{
 
 const STORAGE_CATALOG_KEY="skill-fusion:admin:catalog:v1";
 const STORAGE_RESOLVED_KEY="skill-fusion:admin:resolved:v1";
-const STORAGE_GALLERY_RESCAN_KEY="skill-fusion:admin:gallery-rescan:v2";
+const STORAGE_GALLERY_RESCAN_KEY="skill-fusion:admin:gallery-rescan:v3";
 
 const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
