@@ -210,7 +210,13 @@ function productIdFromBlibliUrl(value:string){
   try{
     const u=new URL(value);
     const match=u.pathname.match(/\/is--([^/?#]+)/i);
-    return match?.[1]||null;
+    if(match?.[1]) return match[1];
+
+    for(const key of ["defaultItemSku","itemSku","sku","itemId"]){
+      const candidate=u.searchParams.get(key);
+      if(candidate&&/^[A-Za-z0-9-]{3,100}$/.test(candidate)) return candidate;
+    }
+    return null;
   }catch{return null}
 }
 
@@ -239,10 +245,10 @@ function titleFromBlibliUrl(value:string){
 
 async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedProduct|null>{
   function fromFinalUrl(finalUrl:string,titleHint?:string,imageHints:string[]=[]):ResolvedProduct|null{
-    const canonicalUrl=canonicalBlibliUrl(finalUrl);
-    const canonicalProductId=productIdFromBlibliUrl(canonicalUrl);
+    const canonicalProductId=productIdFromBlibliUrl(finalUrl);
     if(!canonicalProductId) return null;
 
+    const canonicalUrl=canonicalBlibliUrl(finalUrl);
     const images=sanitizeProductImages(imageHints);
     const title=isUsableProductTitle(titleHint)
       ? String(titleHint).replace(/\s*[|\-]\s*Blibli.*$/i,"").trim()
@@ -262,8 +268,59 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
     };
   }
 
-  // Fallback 1: metadata resolver. This runs only when the primary Apps Script
-  // resolver is stale/unavailable.
+  // Fallback 1: RedirectCheck. CORS is explicitly open and the service follows
+  // the full server-side redirect chain, so the browser can resolve s.blibli.com
+  // without trying to read a cross-origin redirect itself.
+  try{
+    const response=await globalThis.fetch("https://www.redirectcheck.org/api/check",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        url:inputUrl,
+        method:"GET",
+        followMetaRefresh:true,
+        maxHops:20,
+        userAgent:"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/143 Mobile Safari/537.36"
+      })
+    });
+    if(response.ok){
+      const payload=await response.json();
+      const candidates=[
+        payload?.final_result?.canonical,
+        payload?.final_result?.final_url,
+        ...(Array.isArray(payload?.redirects)?payload.redirects.flatMap((row:any)=>[row?.to,row?.canonical]):[])
+      ].filter((value:unknown):value is string=>typeof value==="string");
+
+      for(const value of candidates){
+        if(/^https:\/\/(?:www\.)?blibli\.com(?:[/?#]|$)/i.test(value)){
+          const resolved=fromFinalUrl(value);
+          if(resolved) return resolved;
+        }
+      }
+    }
+  }catch{}
+
+  // Fallback 2: Domainee's browser-safe redirect checker.
+  try{
+    const endpoint="https://api.domainee.dev/v1/tools/redirect-checker?url="+encodeURIComponent(inputUrl);
+    const response=await globalThis.fetch(endpoint,{cache:"no-store"});
+    if(response.ok){
+      const payload=await response.json();
+      const candidates=[
+        payload?.data?.finalUrl,
+        ...(Array.isArray(payload?.data?.hops)?payload.data.hops.map((row:any)=>row?.url):[])
+      ].filter((value:unknown):value is string=>typeof value==="string");
+
+      for(const value of candidates.reverse()){
+        if(/^https:\/\/(?:www\.)?blibli\.com(?:[/?#]|$)/i.test(value)){
+          const resolved=fromFinalUrl(value);
+          if(resolved) return resolved;
+        }
+      }
+    }
+  }catch{}
+
+  // Fallback 3: metadata resolver.
   try{
     const endpoint="https://api.microlink.io/?url="+encodeURIComponent(inputUrl);
     const response=await globalThis.fetch(endpoint,{cache:"no-store"});
@@ -276,8 +333,6 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
         data?.author?.url
       ].filter((value:unknown):value is string=>typeof value==="string");
 
-      // Some metadata services keep the short URL in data.url but include the
-      // resolved Blibli product URL elsewhere in the payload.
       const serialized=JSON.stringify(data).replace(/\\u002F/ig,"/");
       const embedded=serialized.match(/https:\/\/(?:www\.)?blibli\.com\/p\/[^"\\\s<>]+\/is--[A-Za-z0-9-]+/i);
       if(embedded?.[0]) candidates.unshift(embedded[0]);
@@ -289,7 +344,7 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
       ].filter((value:unknown):value is string=>typeof value==="string");
 
       for(const value of candidates){
-        if(/^https:\/\/(?:www\.)?blibli\.com\/p\//i.test(value)&&productIdFromBlibliUrl(value)){
+        if(/^https:\/\/(?:www\.)?blibli\.com(?:[/?#]|$)/i.test(value)){
           const resolved=fromFinalUrl(value,data?.title,imageHints);
           if(resolved) return resolved;
         }
@@ -297,8 +352,7 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
     }
   }catch{}
 
-  // Fallback 2: reader proxy. It follows the shortlink server-side and usually
-  // exposes the final canonical Blibli product URL in the returned text.
+  // Fallback 4: reader proxy.
   try{
     const endpoint="https://r.jina.ai/"+inputUrl;
     const response=await globalThis.fetch(endpoint,{cache:"no-store"});
