@@ -32,10 +32,14 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
 
   const filtered=useMemo(()=>{
     const q=query.trim().toLowerCase();
-    return products.filter(p=>{
-      const searchable=[p.name,p.brand,p.category,...p.features].join(" ").toLowerCase();
-      return (!q||searchable.includes(q))&&(category==="Semua"||p.category===category);
-    });
+    return products
+      .filter(p=>{
+        const searchable=[p.name,p.brand,p.category,...p.features].join(" ").toLowerCase();
+        return (!q||searchable.includes(q))&&(category==="Semua"||p.category===category);
+      })
+      // Newest product first: the highest sequence/product number is always
+      // displayed at the top of the catalog.
+      .sort((a,b)=>(b.sequence||0)-(a.sequence||0));
   },[query,category,products]);
 
   function toggleWishlist(id:string){
