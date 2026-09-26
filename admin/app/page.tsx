@@ -137,6 +137,9 @@ function sanitizeProductImages(images:string[]){
 function sanitizeBlibliGallery(images:string[]){
   return sanitizeProductImages(images).filter(url=>
     /^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(url)
+    ||/^https:\/\/(?:www\.)?acmic\.id\/cdn\/shop\/files\//i.test(url)
+    ||/^https:\/\/cdn\.shopify\.com\/s\/files\//i.test(url)
+    ||/^https:\/\/i02\.appmifile\.com\//i.test(url)
   );
 }
 
