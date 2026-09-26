@@ -1,0 +1,37 @@
+name: Verify Skill Fusion Free Stack
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-free-stack.yml"
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apps Script health
+        run: |
+          set -e
+          API="https://script.google.com/macros/s/AKfycbwEaWGv8ykfHPDqI4eUAp0U9FqYWeMb3RsS57K9QDsxnvbOI9h0HArIVASgn2llUZqaNQ/exec"
+          BODY="$(curl -fsSL "$API?action=health")"
+          echo "HEALTH=$BODY"
+          echo "$BODY" | grep -q '"ok":true'
+          echo "$BODY" | grep -q 'skill-fusion-apps-script'
+      - name: Apps Script catalog
+        run: |
+          set -e
+          API="https://script.google.com/macros/s/AKfycbwEaWGv8ykfHPDqI4eUAp0U9FqYWeMb3RsS57K9QDsxnvbOI9h0HArIVASgn2llUZqaNQ/exec"
+          BODY="$(curl -fsSL "$API?action=catalog")"
+          echo "CATALOG=$BODY"
+          echo "$BODY" | grep -q '"ok":true'
+          echo "$BODY" | grep -q '"products"'
+          echo "$BODY" | grep -q 'ACO-60021-00244-00014'
+          COUNT="$(printf '%s' "$BODY" | grep -o '"sequence"' | wc -l)"
+          echo "PRODUCT_COUNT=$COUNT"
+          test "$COUNT" -ge 5
+      - name: GitHub Pages config
+        run: |
+          set -e
+          CFG="$(curl -fsSL "https://wiliejonathan.github.io/skill-fusion-affiliate/config.js?ts=$(date +%s)")"
+          echo "$CFG"
+          echo "$CFG" | grep -q 'AKfycbwEaWGv8ykfHPDqI4eUAp0U9FqYWeMb3RsS57K9QDsxnvbOI9h0HArIVASgn2llUZqaNQ'
