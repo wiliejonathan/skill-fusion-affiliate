@@ -206,6 +206,95 @@ function validBlibliSource(...candidates:(string|null|undefined)[]){
   return "";
 }
 
+function productIdFromBlibliUrl(value:string){
+  try{
+    const u=new URL(value);
+    const match=u.pathname.match(/\/is--([^/?#]+)/i);
+    return match?.[1]||null;
+  }catch{return null}
+}
+
+function canonicalBlibliUrl(value:string){
+  try{
+    const u=new URL(value);
+    return (u.origin+u.pathname).replace(/\/$/,"");
+  }catch{return value.split("?")[0].replace(/\/$/,"")}
+}
+
+function titleFromBlibliUrl(value:string){
+  try{
+    const u=new URL(value);
+    const before=u.pathname.split("/is--")[0];
+    const slug=before.split("/").filter(Boolean).pop()||"Produk Blibli";
+    return slug
+      .split("-")
+      .filter(Boolean)
+      .map((part,index)=>{
+        if(/^\d/.test(part)||/^[a-z]+\d+$/i.test(part)) return part.toUpperCase();
+        return index===0?part.toUpperCase():part;
+      })
+      .join(" ");
+  }catch{return "Produk Blibli"}
+}
+
+async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedProduct|null>{
+  try{
+    // Browser-side emergency resolver. Primary path stays Apps Script; this only
+    // runs when an older deployed Apps Script rejects a valid shortlink because
+    // gallery metadata is missing.
+    const endpoint="https://api.microlink.io/?url="+encodeURIComponent(inputUrl);
+    const response=await globalThis.fetch(endpoint,{cache:"no-store"});
+    if(!response.ok) return null;
+    const payload=await response.json();
+    const data=payload?.data||{};
+
+    const candidates=[
+      data?.url,
+      data?.publisher?.url,
+      data?.author?.url
+    ].filter((value:unknown):value is string=>typeof value==="string");
+
+    let finalUrl="";
+    for(const value of candidates){
+      if(/^https:\/\/(?:www\.)?blibli\.com\/p\//i.test(value)&&productIdFromBlibliUrl(value)){
+        finalUrl=value;
+        break;
+      }
+    }
+    if(!finalUrl) return null;
+
+    const canonicalUrl=canonicalBlibliUrl(finalUrl);
+    const canonicalProductId=productIdFromBlibliUrl(canonicalUrl);
+    if(!canonicalProductId) return null;
+
+    const rawImages=[
+      data?.image?.url,
+      data?.image,
+      data?.logo?.url
+    ].filter((value:unknown):value is string=>typeof value==="string");
+
+    const images=sanitizeProductImages(rawImages);
+    const title=isUsableProductTitle(data?.title)
+      ? String(data.title).replace(/\s*[|\-]\s*Blibli.*$/i,"").trim()
+      : titleFromBlibliUrl(canonicalUrl);
+
+    return {
+      ok:true,
+      inputUrl,
+      finalUrl,
+      canonicalUrl,
+      canonicalProductId,
+      title,
+      image:images[0]||null,
+      images,
+      price:null,
+      currency:null
+    };
+  }catch{
+    return null;
+  }
+}
+
 export default function AdminPage(){
   const [text,setText]=useState("");
   const [authReady,setAuthReady]=useState(false);
@@ -384,9 +473,28 @@ export default function AdminPage(){
 
     for(const item of ready){
       try{
-        const res=await fetch("/api/resolve?url="+encodeURIComponent(item.inputUrl),{cache:"no-store"});
-        const data:ResolvedProduct=await res.json();
-        if(!data.ok||!data.canonicalProductId) throw new Error(data.message||"Metadata belum lengkap");
+        let data:ResolvedProduct|null=null;
+        let primaryError="";
+
+        try{
+          const res=await fetch("/api/resolve?url="+encodeURIComponent(item.inputUrl),{cache:"no-store"});
+          const primary:ResolvedProduct=await res.json();
+          if(primary.ok&&primary.canonicalProductId) data=primary;
+          else primaryError=primary.message||"Metadata belum lengkap";
+        }catch(error){
+          primaryError=error instanceof Error?error.message:"Backend tidak dapat membaca link Blibli.";
+        }
+
+        // Compatibility fallback for stale Apps Script deployments that still
+        // reject imports when Blibli returns Product ID but no gallery metadata.
+        if(!data){
+          data=await resolveBlibliShortlinkFallback(item.inputUrl);
+        }
+
+        if(!data?.canonicalProductId){
+          throw new Error(primaryError||"Shortlink Blibli belum berhasil di-resolve.");
+        }
+
         next[item.inputUrl]=data;
         newItems.push({
           sequence:nextSequence++,
