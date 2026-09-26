@@ -22,6 +22,8 @@ type DbProduct={
   canonicalUrl:string|null;
   badge:string;
   features:string[];
+  price:string|null;
+  currency:string|null;
 };
 
 const FIRST_LINK="https://s.blibli.com/GNtk/0qrtsw3f";
@@ -38,7 +40,6 @@ const initialCatalog:CatalogIdentity[]=[{
 
 const STORAGE_CATALOG_KEY="skill-fusion:admin:catalog:v1";
 const STORAGE_RESOLVED_KEY="skill-fusion:admin:resolved:v1";
-const STORAGE_GALLERY_RESCAN_KEY="skill-fusion:admin:gallery-rescan:v3";
 
 const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
@@ -96,7 +97,9 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
       affiliateUrl,
       canonicalUrl:item.canonicalUrl||meta?.canonicalUrl||null,
       badge:"Blibli Affiliate",
-      features:inferFeatures(name)
+      features:inferFeatures(name),
+      price:meta?.price||null,
+      currency:meta?.currency||null
     });
   });
   return products;
@@ -119,8 +122,8 @@ function dbToLocal(products:DbProduct[]){
       title:p.name,
       image:p.images?.[0]||null,
       images:p.images||[],
-      price:null,
-      currency:null,
+      price:p.price||null,
+      currency:p.currency||null,
       ok:true
     };
   }
@@ -172,18 +175,21 @@ export default function AdminPage(){
   useEffect(()=>{
     let loadedCatalog=initialCatalog;
     let loadedResolved=initialResolved;
+    let hasLocalCatalog=false;
+    let hasLocalResolved=false;
+
     try{
       const savedCatalog=window.localStorage.getItem(STORAGE_CATALOG_KEY);
       const savedResolved=window.localStorage.getItem(STORAGE_RESOLVED_KEY);
 
       if(savedCatalog){
         const parsed=JSON.parse(savedCatalog);
-        if(Array.isArray(parsed)){
+        if(Array.isArray(parsed)&&parsed.length){
           loadedCatalog=parsed.map((item:CatalogIdentity,index:number)=>({
             ...item,
             sequence:typeof item?.sequence==="number"?item.sequence:index+1
           }));
-          setCatalog(loadedCatalog);
+          hasLocalCatalog=true;
         }
       }
 
@@ -191,19 +197,51 @@ export default function AdminPage(){
         const parsed=JSON.parse(savedResolved);
         if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
           loadedResolved=parsed;
-          setResolved(parsed);
+          hasLocalResolved=true;
         }
       }
     }catch{
       setNotice("Data lokal sebelumnya tidak bisa dibaca. Mengambil katalog server.");
     }
 
+    setCatalog(loadedCatalog);
+    setResolved(loadedResolved);
+
     (async()=>{
       try{
-        await pushDatabase(loadedCatalog,loadedResolved);
-        await pullDatabase();
+        const res=await fetch("/api/catalog",{cache:"no-store"});
+        const data=await res.json();
+
+        if(data?.ok&&Array.isArray(data.products)){
+          const server=dbToLocal(data.products as DbProduct[]);
+          setServerReady(true);
+
+          // Admin adalah workspace sendiri. Data lokal hasil Reload DOM tidak
+          // boleh otomatis ditimpa data Client yang lebih lama, tetapi produk
+          // baru dari server tetap harus ikut muncul saat Admin dibuka.
+          if(hasLocalCatalog||hasLocalResolved){
+            const byUrl=new Map<string,CatalogIdentity>();
+            for(const row of server.catalog){
+              if(row.affiliateUrl) byUrl.set(row.affiliateUrl,row);
+            }
+            for(const row of loadedCatalog){
+              if(row.affiliateUrl) byUrl.set(row.affiliateUrl,row);
+            }
+
+            const mergedCatalog=[...byUrl.values()]
+              .sort((a,b)=>(a.sequence||0)-(b.sequence||0))
+              .map((row,index)=>({...row,sequence:row.sequence||index+1}));
+
+            const mergedResolved={...server.resolved,...loadedResolved};
+            setCatalog(mergedCatalog);
+            setResolved(mergedResolved);
+          }else{
+            setCatalog(server.catalog);
+            setResolved(server.resolved);
+          }
+        }
       }catch{
-        setNotice("Koneksi database belum siap. Data lokal tetap dipertahankan.");
+        setNotice("Koneksi database belum siap. Data Admin lokal tetap dipertahankan.");
       }finally{
         setHydrated(true);
       }
@@ -215,113 +253,6 @@ export default function AdminPage(){
     window.localStorage.setItem(STORAGE_CATALOG_KEY,JSON.stringify(catalog));
     window.localStorage.setItem(STORAGE_RESOLVED_KEY,JSON.stringify(resolved));
   },[catalog,resolved,hydrated]);
-
-  useEffect(()=>{
-    if(!hydrated) return;
-
-    const missing=catalog.filter(item=>{
-      const key=item.affiliateUrl||"";
-      const meta=resolved[key];
-      return key&&(!meta||!meta.images||meta.images.length===0);
-    });
-
-    if(!missing.length) return;
-    let cancelled=false;
-
-    (async()=>{
-      const patched={...resolved};
-      let changed=false;
-
-      for(const item of missing){
-        const key=item.affiliateUrl||"";
-        const meta=patched[key];
-        const source=item.canonicalUrl||meta?.canonicalUrl||key;
-        try{
-          const res=await fetch("/api/resolve?url="+encodeURIComponent(source),{cache:"no-store"});
-          const data:ResolvedProduct=await res.json();
-          if(data?.images?.length){
-            patched[key]={...meta,...data,inputUrl:key};
-            changed=true;
-          }
-        }catch{}
-      }
-
-      if(!cancelled&&changed){
-        setResolved(patched);
-        await pushDatabase(catalog,patched);
-        setNotice("Foto produk yang sebelumnya kosong berhasil diperbarui dan disinkronkan.");
-      }
-    })();
-
-    return ()=>{cancelled=true};
-  },[hydrated]);
-
-  useEffect(()=>{
-    if(!hydrated) return;
-
-    try{
-      if(window.localStorage.getItem(STORAGE_GALLERY_RESCAN_KEY)==="1") return;
-    }catch{}
-
-    let cancelled=false;
-
-    (async()=>{
-      const patched={...resolved};
-      let changed=false;
-      let upgraded=0;
-
-      for(const item of catalog){
-        const key=item.affiliateUrl||"";
-        if(!key) continue;
-
-        const current=patched[key];
-        const source=item.canonicalUrl||current?.canonicalUrl||key;
-        const currentCount=current?.images?.length||(current?.image?1:0);
-
-        try{
-          const res=await fetch(
-            "/api/resolve?url="+encodeURIComponent(source)+"&refreshGallery="+Date.now(),
-            {cache:"no-store"}
-          );
-          const data:ResolvedProduct=await res.json();
-          const nextCount=data?.images?.length||0;
-
-          // Never shrink an existing gallery. This migration only repairs
-          // products where the improved resolver can prove that more media exists.
-          if(data?.ok&&nextCount>currentCount){
-            patched[key]={
-              ...current,
-              ...data,
-              inputUrl:key,
-              image:data.images?.[0]||data.image||current?.image||null,
-              images:data.images
-            };
-            changed=true;
-            upgraded++;
-          }
-        }catch{}
-      }
-
-      if(cancelled) return;
-
-      if(changed){
-        setResolved(patched);
-        const synced=await pushDatabase(catalog,patched);
-        if(synced){
-          const local=dbToLocal(synced);
-          setCatalog(local.catalog);
-          setResolved(local.resolved);
-        }
-        setNotice(`Galeri produk diperiksa ulang · ${upgraded} produk mendapat foto tambahan.`);
-      }
-
-      try{
-        window.localStorage.setItem(STORAGE_GALLERY_RESCAN_KEY,"1");
-      }catch{}
-    })();
-
-    return ()=>{cancelled=true};
-  },[hydrated]);
 
   const checks=useMemo(()=>{
     const lines=[...new Set(text.split(/\r?\n|\s+(?=https?:\/\/)/).map(x=>x.trim()).filter(Boolean))];
