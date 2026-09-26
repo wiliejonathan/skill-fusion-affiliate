@@ -3,7 +3,7 @@ const DRAFT_SHEET = 'Draft';
 const PUBLISHED_SHEET = 'Published';
 const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
-const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description'];
+const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt'];
 
 const PRODUCT_FETCH_UAS = [
   'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)',
@@ -42,8 +42,10 @@ function doGet(e){
   let out;
   try{
     const action=String(p.action||'catalog');
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:2,time:new Date().toISOString()};
+    ensureSchema_();
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:3,time:new Date().toISOString()};
     else if(action==='catalog') out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
+    else if(action==='price') out=publicPrice_(String(p.id||''));
     else throw new Error('Operasi Admin wajib menggunakan POST');
   }catch(err){out={ok:false,message:String(err.message||err)}}
   return output_(out,p.callback);
@@ -54,6 +56,8 @@ function doPost(e){
   try{
     const p=JSON.parse(e&&e.postData&&e.postData.contents||'{}');
     requireAdmin_(p.key);
+    ensureSchema_();
+    try{ensurePriceRefreshTrigger_()}catch(triggerError){}
     const action=String(p.action||'');
     if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
     if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
@@ -163,6 +167,9 @@ function savePublish_(request){
     if(current&&!normalizePrice_(p.price)&&normalizePrice_(current.price)){
       p.price=current.price;
       p.currency=current.currency||p.currency||'IDR';
+      p.priceUpdatedAt=current.priceUpdatedAt||p.priceUpdatedAt||'';
+    }else if(current&&!p.priceUpdatedAt&&current.priceUpdatedAt){
+      p.priceUpdatedAt=current.priceUpdatedAt;
     }
     if(current&&!cleanDescription_(p.description||'')&&cleanDescription_(current.description||'')){
       p.description=current.description;
@@ -186,6 +193,38 @@ function output_(obj,callback){
 
 function ss_(){return SpreadsheetApp.openById(SHEET_ID)}
 function sheet_(name){const s=ss_().getSheetByName(name);if(!s)throw new Error('Sheet '+name+' tidak ditemukan');return s}
+function ensureSchema_(){
+  [DRAFT_SHEET,PUBLISHED_SHEET].forEach(function(name){
+    const s=sheet_(name);
+    if(s.getMaxColumns()<HEADERS.length){
+      s.insertColumnsAfter(s.getMaxColumns(),HEADERS.length-s.getMaxColumns());
+    }
+    const current=s.getRange(1,1,1,HEADERS.length).getValues()[0];
+    let different=false;
+    for(let i=0;i<HEADERS.length;i++){
+      if(String(current[i]||'')!==HEADERS[i]){different=true;break}
+    }
+    if(different)s.getRange(1,1,1,HEADERS.length).setValues([HEADERS]);
+  });
+}
+function priceIsFresh_(p,maxAgeMs){
+  if(!p||!normalizePrice_(p.price)||!p.priceUpdatedAt)return false;
+  const ts=Date.parse(String(p.priceUpdatedAt));
+  return isFinite(ts)&&(Date.now()-ts)<maxAgeMs;
+}
+function ensurePriceRefreshTrigger_(){
+  const handler='scheduledRefreshPrices';
+  const exists=ScriptApp.getProjectTriggers().some(function(t){return t.getHandlerFunction()===handler});
+  if(!exists)ScriptApp.newTrigger(handler).timeBased().everyMinutes(10).create();
+}
+function setupPriceRefreshTrigger(){
+  ensureSchema_();
+  ScriptApp.getProjectTriggers().forEach(function(t){
+    if(t.getHandlerFunction()==='scheduledRefreshPrices')ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('scheduledRefreshPrices').timeBased().everyMinutes(10).create();
+  scheduledRefreshPrices();
+}
 function config_(){
   const values=sheet_(CONFIG_SHEET).getDataRange().getValues(),map={};
   for(let i=1;i<values.length;i++){if(values[i][0])map[String(values[i][0])]=String(values[i][1]||'')}
@@ -198,10 +237,10 @@ function rowToProduct_(r){
   let images=[],features=[];
   try{images=JSON.parse(r[6]||'[]')}catch(e){}
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
-  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||'')};
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||'')};
 }
 function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
-function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||''].map(safeCell_)}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||''].map(safeCell_)}
 function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
 function findRow_(name,id){const s=sheet_(name);if(s.getLastRow()<2)return -1;const v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
 function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
@@ -275,15 +314,18 @@ function reloadFromBlibli_(p){
   }
   const htmlPrice=extractHtmlPrice_(html);
   const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
-  const price=normalizePrice_(summary.price||htmlPrice||p.price||'');
-  const currency=(summary.currency||htmlCurrency||p.currency||(price?'IDR':'')).toUpperCase();
+  const searchPrice=(!summary.price&&!htmlPrice)?searchPriceData_(id,title,canonical):{price:'',currency:''};
+  const freshPrice=normalizePrice_(summary.price||htmlPrice||searchPrice.price||'');
+  const price=normalizePrice_(freshPrice||p.price||'');
+  const currency=(summary.currency||htmlCurrency||searchPrice.currency||p.currency||(price?'IDR':'')).toUpperCase();
+  const priceUpdatedAt=freshPrice?new Date().toISOString():(p.priceUpdatedAt||'');
   const htmlDescription=pick_(html,[
     /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i
   ]);
   const description=cleanDescription_(summary.description||htmlDescription||p.description||'');
   if(!isUsableProductTitle_(title))title=p.name;
-  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,source:'blibli-reload'});
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,priceUpdatedAt:priceUpdatedAt,source:'blibli-reload'});
 }
 function resolveUrl_(url){
   let current=url,html='';
@@ -622,6 +664,162 @@ function extractHtmlPrice_(html){
   ]);
   if(!raw)raw=pick_(value,[/"price"\s*:\s*"?([0-9][0-9.,]*)"?/i]);
   return normalizePrice_(raw);
+}
+function searchPriceData_(id,title,referer){
+  const exactId=String(id||'').trim().toUpperCase();
+  const baseId=exactId.replace(/-\d{5}$/,'');
+  const terms=[String(id||'').trim(),String(title||'').trim()].filter(Boolean);
+  const candidates=[];
+
+  function visit(node){
+    if(!node||typeof node!=='object')return;
+
+    if(Array.isArray(node)){
+      node.forEach(visit);
+      return;
+    }
+
+    const own=[];
+    Object.keys(node).forEach(function(key){
+      const value=node[key];
+      if(typeof value==='string'||typeof value==='number')own.push(String(value).toUpperCase());
+    });
+    const joined=own.join(' ');
+    let score=0;
+    if(exactId&&joined.indexOf(exactId)>=0)score=300;
+    else if(baseId&&joined.indexOf(baseId)>=0)score=220;
+
+    if(score){
+      let data=extractSummaryPrice_(node);
+      if(!data.price)data=extractSerializedPrice_(JSON.stringify(node));
+      const price=normalizePrice_(data.price);
+      if(price)candidates.push({price:price,currency:data.currency||'IDR',score:score});
+    }
+
+    Object.keys(node).forEach(function(key){
+      const child=node[key];
+      if(child&&typeof child==='object')visit(child);
+    });
+  }
+
+  for(let i=0;i<terms.length;i++){
+    const endpoint='https://www.blibli.com/backend/search/products?searchTerm='+encodeURIComponent(terms[i])+'&start=0&itemPerPage=24';
+    const payload=fetchJson_(endpoint,referer||'https://www.blibli.com/');
+    if(!payload)continue;
+    visit(payload);
+    if(candidates.some(function(row){return row.score>=300}))break;
+  }
+
+  if(!candidates.length)return {price:'',currency:''};
+  candidates.sort(function(a,b){
+    if(b.score!==a.score)return b.score-a.score;
+    return Number(a.price)-Number(b.price);
+  });
+  return {price:candidates[0].price,currency:candidates[0].currency||'IDR'};
+}
+function refreshPriceForProduct_(p){
+  if(!p||!p.id)return p;
+
+  // Cheapest path first: Blibli search normally exposes sell price in one request.
+  let priceData=searchPriceData_(p.id,p.name,p.canonicalUrl||p.affiliateUrl);
+
+  // Fall back to product summary only when search is unavailable.
+  if(!priceData.price){
+    const summary=summaryData_(p.canonicalUrl||p.affiliateUrl,p.id,p.canonicalUrl||p.affiliateUrl);
+    priceData={price:summary.price||'',currency:summary.currency||''};
+  }
+
+  // Final fallback: PDP HTML.
+  if(!priceData.price){
+    const html=fetchText_(p.canonicalUrl||p.affiliateUrl);
+    priceData={
+      price:extractHtmlPrice_(html),
+      currency:pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||''
+    };
+  }
+
+  const price=normalizePrice_(priceData.price);
+  if(!price)return p;
+
+  return Object.assign({},p,{
+    price:price,
+    currency:String(priceData.currency||p.currency||'IDR').toUpperCase(),
+    priceUpdatedAt:new Date().toISOString(),
+    source:'live-price'
+  });
+}
+function publicPrice_(id){
+  if(!/^[A-Za-z0-9-]{3,100}$/.test(id))throw new Error('Product ID tidak valid');
+  const cached=readProducts_(PUBLISHED_SHEET).find(function(p){return p.id===id});
+  if(!cached)throw new Error('Produk tidak ditemukan');
+
+  // Thirty minutes feels live to a visitor while keeping external requests low.
+  if(priceIsFresh_(cached,30*60*1000)){
+    return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
+  }
+
+  const cache=CacheService.getScriptCache();
+  const throttleKey='price-attempt-'+id;
+  if(cache.get(throttleKey)){
+    return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
+  }
+  cache.put(throttleKey,'1',300);
+
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(1500)){
+    return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
+  }
+
+  try{
+    const fresh=refreshPriceForProduct_(cached);
+    if(normalizePrice_(fresh.price)){
+      upsert_(DRAFT_SHEET,fresh);
+      upsert_(PUBLISHED_SHEET,fresh);
+      SpreadsheetApp.flush();
+    }
+    return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
+  }finally{
+    if(lock.hasLock())lock.releaseLock();
+  }
+}
+function scheduledRefreshPrices(){
+  ensureSchema_();
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(5000))return;
+
+  try{
+    const products=readProducts_(PUBLISHED_SHEET);
+    if(!products.length)return;
+
+    const props=PropertiesService.getScriptProperties();
+    let cursor=Number(props.getProperty('PRICE_CURSOR')||0);
+    if(!isFinite(cursor)||cursor<0)cursor=0;
+
+    const batchSize=20;
+    let processed=0;
+    let updated=0;
+
+    while(processed<batchSize&&processed<products.length){
+      const index=(cursor+processed)%products.length;
+      const current=products[index];
+      try{
+        const fresh=refreshPriceForProduct_(current);
+        if(normalizePrice_(fresh.price)){
+          upsert_(DRAFT_SHEET,fresh);
+          upsert_(PUBLISHED_SHEET,fresh);
+          updated++;
+        }
+      }catch(e){}
+      processed++;
+    }
+
+    cursor=(cursor+processed)%products.length;
+    props.setProperty('PRICE_CURSOR',String(cursor));
+    SpreadsheetApp.flush();
+    log_('PRICE_BATCH','ALL','OK',updated+' updated / '+processed+' checked; next='+cursor);
+  }finally{
+    if(lock.hasLock())lock.releaseLock();
+  }
 }
 function normalizeImage_(s){
   if(!s)return '';
