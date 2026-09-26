@@ -417,7 +417,7 @@ export default function AdminPage(){
     const previousImages=sanitizeProductImages(
       previous?.images?.length ? previous.images : (previous?.image?[previous.image]:[])
     );
-    const domImages=sanitizeProductImages(
+    const domImages=sanitizeBlibliGallery(
       data.images?.length ? data.images : (data.image?[data.image]:[])
     );
     // Reload DOM is authoritative when it returns usable product media.
