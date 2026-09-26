@@ -3,7 +3,7 @@ export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwEaWGv8
 // Simple POST avoids a preflight and keeps the admin key out of URLs/JSONP.
 export async function requestAppsScript(action:string, payload:Record<string,unknown>={}, key?:string){
   const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),90000);
+  const timeout=setTimeout(()=>controller.abort(),action==="price"?12000:90000);
   try{
     const url=new URL(APPS_SCRIPT_URL);
     let options:RequestInit={signal:controller.signal,redirect:"follow",credentials:"omit"};
