@@ -80,6 +80,7 @@ export const products:Product[]=[
     "badge": "Blibli Affiliate",
     "features": [
       "USB Type-C",
+      "6A",
       "Fast charging"
     ],
     "price": null,
@@ -90,10 +91,12 @@ export const products:Product[]=[
     "id": "ACO-60021-00234-00001",
     "canonicalProductId": "ACO-60021-00234-00001",
     "name": "ACMIC PDC100 power delivery pd 100CM cable usb type c to usb type c",
-    "brand": "",
-    "category": "",
-    "images": [],
-    "affiliateUrl": "",
+    "brand": "ACMIC",
+    "category": "Charging & Cable",
+    "images": [
+      "https://acmic.id/cdn/shop/files/CABLE_PDC100_1000x.jpg?v=1720595179"
+    ],
+    "affiliateUrl": "https://s.blibli.com/GNtk/gd0wp7zz",
     "badge": "Blibli Affiliate",
     "features": [
       "100 cm",
