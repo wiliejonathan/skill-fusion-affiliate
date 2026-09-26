@@ -40,6 +40,7 @@ const initialCatalog:CatalogIdentity[]=[{
 
 const STORAGE_CATALOG_KEY="skill-fusion:admin:catalog:v1";
 const STORAGE_RESOLVED_KEY="skill-fusion:admin:resolved:v1";
+const STORAGE_DIRTY_KEY="skill-fusion:admin:dirty:v1";
 
 const initialResolved:Record<string,ResolvedProduct>={
   [FIRST_LINK]:{
@@ -141,6 +142,7 @@ export default function AdminPage(){
   const [refreshingUrl,setRefreshingUrl]=useState<string|null>(null);
   const [reloadingUrl,setReloadingUrl]=useState<string|null>(null);
   const [bulkAction,setBulkAction]=useState<null|"refresh"|"reload">(null);
+  const [dirtyUrls,setDirtyUrls]=useState<string[]>([]);
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
 
   async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
@@ -175,12 +177,12 @@ export default function AdminPage(){
   useEffect(()=>{
     let loadedCatalog=initialCatalog;
     let loadedResolved=initialResolved;
-    let hasLocalCatalog=false;
-    let hasLocalResolved=false;
+    let loadedDirty:string[]=[];
 
     try{
       const savedCatalog=window.localStorage.getItem(STORAGE_CATALOG_KEY);
       const savedResolved=window.localStorage.getItem(STORAGE_RESOLVED_KEY);
+      const savedDirty=window.localStorage.getItem(STORAGE_DIRTY_KEY);
 
       if(savedCatalog){
         const parsed=JSON.parse(savedCatalog);
@@ -189,7 +191,6 @@ export default function AdminPage(){
             ...item,
             sequence:typeof item?.sequence==="number"?item.sequence:index+1
           }));
-          hasLocalCatalog=true;
         }
       }
 
@@ -197,7 +198,13 @@ export default function AdminPage(){
         const parsed=JSON.parse(savedResolved);
         if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
           loadedResolved=parsed;
-          hasLocalResolved=true;
+        }
+      }
+
+      if(savedDirty){
+        const parsed=JSON.parse(savedDirty);
+        if(Array.isArray(parsed)){
+          loadedDirty=parsed.filter((value:unknown):value is string=>typeof value==="string");
         }
       }
     }catch{
@@ -206,6 +213,7 @@ export default function AdminPage(){
 
     setCatalog(loadedCatalog);
     setResolved(loadedResolved);
+    setDirtyUrls(loadedDirty);
 
     (async()=>{
       try{
@@ -214,31 +222,32 @@ export default function AdminPage(){
 
         if(data?.ok&&Array.isArray(data.products)){
           const server=dbToLocal(data.products as DbProduct[]);
+          const dirty=new Set(loadedDirty);
+          const serverUrls=new Set(server.catalog.map(row=>row.affiliateUrl||"").filter(Boolean));
           setServerReady(true);
 
-          // Admin adalah workspace sendiri. Data lokal hasil Reload DOM tidak
-          // boleh otomatis ditimpa data Client yang lebih lama, tetapi produk
-          // baru dari server tetap harus ikut muncul saat Admin dibuka.
-          if(hasLocalCatalog||hasLocalResolved){
-            const byUrl=new Map<string,CatalogIdentity>();
-            for(const row of server.catalog){
-              if(row.affiliateUrl) byUrl.set(row.affiliateUrl,row);
-            }
-            for(const row of loadedCatalog){
-              if(row.affiliateUrl) byUrl.set(row.affiliateUrl,row);
-            }
-
-            const mergedCatalog=[...byUrl.values()]
-              .sort((a,b)=>(a.sequence||0)-(b.sequence||0))
-              .map((row,index)=>({...row,sequence:row.sequence||index+1}));
-
-            const mergedResolved={...server.resolved,...loadedResolved};
-            setCatalog(mergedCatalog);
-            setResolved(mergedResolved);
-          }else{
-            setCatalog(server.catalog);
-            setResolved(server.resolved);
+          // Server/Client wins by default. Only explicit unsynced Reload DOM
+          // drafts are allowed to override the server copy on this Admin device.
+          const byUrl=new Map<string,CatalogIdentity>();
+          for(const row of server.catalog){
+            if(row.affiliateUrl) byUrl.set(row.affiliateUrl,row);
           }
+          for(const row of loadedCatalog){
+            const url=row.affiliateUrl||"";
+            if(url&&(dirty.has(url)||!serverUrls.has(url))) byUrl.set(url,row);
+          }
+
+          const mergedCatalog=[...byUrl.values()]
+            .sort((a,b)=>(a.sequence||0)-(b.sequence||0))
+            .map((row,index)=>({...row,sequence:row.sequence||index+1}));
+
+          const mergedResolved={...server.resolved};
+          for(const [url,meta] of Object.entries(loadedResolved)){
+            if(dirty.has(url)||!server.resolved[url]) mergedResolved[url]=meta;
+          }
+
+          setCatalog(mergedCatalog);
+          setResolved(mergedResolved);
         }
       }catch{
         setNotice("Koneksi database belum siap. Data Admin lokal tetap dipertahankan.");
@@ -252,7 +261,8 @@ export default function AdminPage(){
     if(!hydrated) return;
     window.localStorage.setItem(STORAGE_CATALOG_KEY,JSON.stringify(catalog));
     window.localStorage.setItem(STORAGE_RESOLVED_KEY,JSON.stringify(resolved));
-  },[catalog,resolved,hydrated]);
+    window.localStorage.setItem(STORAGE_DIRTY_KEY,JSON.stringify(dirtyUrls));
+  },[catalog,resolved,dirtyUrls,hydrated]);
 
   const checks=useMemo(()=>{
     const lines=[...new Set(text.split(/\r?\n|\s+(?=https?:\/\/)/).map(x=>x.trim()).filter(Boolean))];
@@ -318,8 +328,11 @@ export default function AdminPage(){
         setServerReady(true);
       }
 
+      setDirtyUrls(prev=>prev.filter(url=>!newItems.some(item=>item.affiliateUrl===url)));
       setNotice(`${newItems.length} produk baru berhasil di-import dan langsung disinkronkan ke Client.`);
     }catch{
+      const failedUrls=newItems.map(item=>item.affiliateUrl).filter((x):x is string=>Boolean(x));
+      setDirtyUrls(prev=>[...new Set([...prev,...failedUrls])]);
       setNotice(`${newItems.length} produk masuk lokal, tetapi sinkron database gagal. Coba Refresh Data.`);
     }finally{
       setBusy(false);
@@ -398,6 +411,7 @@ export default function AdminPage(){
       // Do not replace the whole Admin workspace with the database response.
       // Other products may have Reload DOM changes that have not been synced yet.
       const refreshed=resolved[url];
+      setDirtyUrls(prev=>prev.filter(item=>item!==url));
       setProductNotice(prev=>({
         ...prev,
         [url]:refreshed?.images?.length
@@ -438,6 +452,7 @@ export default function AdminPage(){
       const next=mergeReloadedProduct(url,data,catalog,resolved);
       setCatalog(next.catalog);
       setResolved(next.resolved);
+      setDirtyUrls(prev=>prev.includes(url)?prev:[...prev,url]);
 
       setProductNotice(prev=>({
         ...prev,
@@ -466,6 +481,7 @@ export default function AdminPage(){
       const local=dbToLocal(synced);
       setCatalog(local.catalog);
       setResolved(local.resolved);
+      setDirtyUrls([]);
       setNotice(`✓ Refresh Data All selesai · ${synced.length} produk Admin sudah dikirim ke Client.`);
     }catch(error){
       setNotice("Refresh Data All gagal: "+(error instanceof Error?error.message:"coba lagi"));
@@ -480,6 +496,7 @@ export default function AdminPage(){
     setBulkAction("reload");
     let nextCatalog=[...catalog];
     let nextResolved={...resolved};
+    const reloadedUrls:string[]=[];
     let success=0;
     let failed=0;
 
@@ -504,6 +521,7 @@ export default function AdminPage(){
           const next=mergeReloadedProduct(url,data,nextCatalog,nextResolved);
           nextCatalog=next.catalog;
           nextResolved=next.resolved;
+          reloadedUrls.push(url);
           success++;
 
           setProductNotice(prev=>({
@@ -521,6 +539,7 @@ export default function AdminPage(){
 
       setCatalog(nextCatalog);
       setResolved(nextResolved);
+      setDirtyUrls(prev=>[...new Set([...prev,...reloadedUrls])]);
       setNotice(
         failed
           ? `Reload All selesai · ${success} berhasil, ${failed} gagal. Data masih di Admin; gunakan Refresh Data All untuk kirim ke Client.`
@@ -537,6 +556,7 @@ export default function AdminPage(){
 
     setCatalog(prev=>prev.filter(x=>x.affiliateUrl!==url));
     setResolved(prev=>{const n={...prev};delete n[url];return n});
+    setDirtyUrls(prev=>prev.filter(item=>item!==url));
 
     try{
       if(id){
