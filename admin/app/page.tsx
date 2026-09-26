@@ -8,7 +8,7 @@ import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
 type ResolvedProduct={
   inputUrl:string; finalUrl:string; canonicalUrl:string|null; canonicalProductId:string|null;
-  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; description?:string|null; ok:boolean; message?:string;
+  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; description?:string|null; priceUpdatedAt?:string|null; ok:boolean; message?:string;
 };
 
 type DbProduct={
@@ -26,6 +26,7 @@ type DbProduct={
   price:string|null;
   currency:string|null;
   description?:string|null;
+  priceUpdatedAt?:string|null;
 };
 
 const FIRST_LINK="https://s.blibli.com/GNtk/0qrtsw3f";
@@ -103,7 +104,8 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
       features:inferFeatures(name),
       price:meta?.price||null,
       currency:meta?.currency||null,
-      description:meta?.description||null
+      description:meta?.description||null,
+      priceUpdatedAt:meta?.priceUpdatedAt||null
     });
   });
   return products;
@@ -195,6 +197,7 @@ function dbToLocal(products:DbProduct[]){
       price:p.price||null,
       currency:p.currency||null,
       description:p.description||null,
+      priceUpdatedAt:p.priceUpdatedAt||null,
       ok:true
     };
   }
