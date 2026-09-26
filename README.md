@@ -1,73 +1,59 @@
-# Skill Fusion Affiliate Marketplace
+# Skill Fusion Affiliate
 
-Skill Fusion is split into **two deployable websites** that share one future catalog/database layer.
+Skill Fusion Affiliate now uses a **free-first architecture**:
 
-## 1. Client website
+- **GitHub Pages** — Client + Admin static website
+- **Google Sheets** — product database
+- **Google Apps Script** — API and Blibli reload/publish actions
+- **No Vercel required**
+- **No Neon required**
 
-The repository root is the public marketplace for visitors.
+## Live / working paths
 
-Responsibilities:
-- product catalog
-- search, category and brand filters
-- price/rating/Skill Fusion Score filters
-- wishlist and compare
-- product detail pages
-- outbound Blibli affiliate links
+- Client source: `/site/index.html`
+- Admin source: `/site/admin.html`
+- Apps Script source: `/apps-script/Code.gs`
+- Database spreadsheet ID: `1V3LTciKM0AAXQAbdk-1eNk6Ie0aXL_ksvSDBzDVjUI0`
 
-## 2. Admin website
+Expected GitHub Pages URL after Pages is enabled:
 
-The `/admin` project is a separate private Next.js application.
+- Client: https://wiliejonathan.github.io/skill-fusion-affiliate/
+- Admin: https://wiliejonathan.github.io/skill-fusion-affiliate/admin.html
 
-Responsibilities:
-- bulk paste Blibli affiliate links
-- parse canonical Blibli Product IDs
-- duplicate detection before import
-- review/approval queue
-- future metadata extraction/editing
-- publish/unpublish
-- catalog maintenance and analytics
+## Data flow
 
-The admin website is intended to be deployed separately from the public client website.
+### Reload DOM
+Blibli → Google Sheets **Draft**
 
-## Commerce scope
+This refreshes the product title, canonical Product ID, canonical URL, price/currency when available, features, and product gallery. The Apps Script resolver checks Blibli product HTML plus item/product summary JSON endpoints and keeps the largest coherent gallery.
 
-**Primary merchant: Blibli Affiliate (Indonesia only).**
+### Refresh Data
+Google Sheets **Draft** → **Published**
 
-The catalog is intended for technology products that:
-- are sold on Blibli Indonesia
-- are ready stock / eligible for Blibli Affiliate
-- use Indonesian Rupiah checkout
-- fit Skill Fusion technology categories
-- pass Skill Fusion quality and scoring rules
+The Client only reads Published data, so a Reload never changes the public catalog until Refresh Data is pressed.
 
-## Duplicate policy
+### Bulk actions
+- **Reload All** — reload every Draft product from Blibli
+- **Refresh Data All** — publish all Draft products to Client
 
-Exact duplicates are blocked before catalog creation using this priority:
+## Google Sheets tabs
 
-1. Blibli canonical Product ID, for example `HOM-70013-01243-00006`
-2. canonical product URL
-3. exact affiliate URL
-4. normalized title + brand is a review signal for a possible duplicate
+- `Draft` — Admin working copy
+- `Published` — Client catalog
+- `Config` — API/admin settings
+- `Logs` — reload/publish/delete history
 
-A second affiliate link for the same canonical product should update the existing product's affiliate link rather than create a second catalog record.
+## One-time Google Apps Script deployment
 
-## Roadmap
+Open the database Sheet → **Extensions → Apps Script**, paste `apps-script/Code.gs`, then deploy as **Web app**:
 
-1. Register / verify Skill Fusion media in Blibli Affiliate
-2. Confirm the Blibli-approved product-link workflow
-3. Bulk affiliate-link importer
-4. Product normalization + duplicate detection
-5. Metadata extraction and category/specification mapping
-6. Quality gate
-7. Skill Fusion scoring engine
-8. Approval queue + publish workflow
-9. Shared production database/API
-10. Product detail pages
-11. Affiliate outbound-click analytics
-12. SEO schema, sitemap and index controls
+- Execute as: **Me**
+- Who has access: **Anyone**
 
-The long-term optimization target is **revenue per visitor**, not raw catalog size.
+Copy the `/exec` URL into the Admin Connection panel. The Admin Key is stored in the private `Config` sheet.
 
-## Important integration note
+## Legacy code
 
-Skill Fusion does not assume that Blibli exposes a public Affiliate API or Product Data Feed. The integration layer remains modular so it can move to an official API/feed later without changing the catalog identity, deduplication, scoring, client website or admin workflow.
+The previous Next.js/Vercel/Neon implementation remains in the repository only as a rollback/reference copy. The active CI no longer builds or depends on it.
+
+See `MIGRATION.md` for the migration details.
