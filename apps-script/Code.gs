@@ -30,8 +30,9 @@ function doGet(e){
 
 function output_(obj,callback){
   const json=JSON.stringify(obj);
-  if(callback){
-    return ContentService.createTextOutput(String(callback)+'('+json+');').setMimeType(ContentService.MimeType.JAVASCRIPT);
+  const cb=String(callback||'');
+  if(cb && /^[A-Za-z_$][A-Za-z0-9_.$]*$/.test(cb)){
+    return ContentService.createTextOutput(cb+'('+json+');').setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
   return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
 }
@@ -112,12 +113,21 @@ function resolveUrl_(url){
   for(let i=0;i<6;i++){
     const r=UrlFetchApp.fetch(current,{followRedirects:false,muteHttpExceptions:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}});
     const code=r.getResponseCode(),h=r.getAllHeaders(),loc=h.Location||h.location;
-    if(code>=300&&code<400&&loc){current=String(loc).match(/^https?:/)?String(loc):new URL(String(loc),current).toString();continue}
+    if(code>=300&&code<400&&loc){current=absoluteUrl_(current,String(loc));continue}
     html=r.getContentText();
     break;
   }
   const c=pick_(html,[/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i]);
   return {finalUrl:current,canonical:c||current};
+}
+function absoluteUrl_(base,loc){
+  if(/^https?:\/\//i.test(loc))return loc;
+  if(/^\/\//.test(loc))return 'https:'+loc;
+  const m=String(base).match(/^(https?:\/\/[^/]+)(\/.*)?$/i);
+  if(!m)return loc;
+  if(loc.charAt(0)==='/')return m[1]+loc;
+  const path=(m[2]||'/').split('?')[0].replace(/[^/]*$/,'');
+  return m[1]+path+loc;
 }
 function fetchText_(url){try{return UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{Accept:'text/html,application/xhtml+xml','Accept-Language':'id-ID,id;q=0.9,en;q=0.8'}}).getContentText()}catch(e){return ''}}
 function fetchJson_(url,referer){try{const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{Accept:'application/json,text/plain,*/*',Referer:referer||''}});if(r.getResponseCode()<200||r.getResponseCode()>=300)return null;return JSON.parse(r.getContentText())}catch(e){return null}}
