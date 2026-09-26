@@ -124,7 +124,9 @@ export async function GET(req:NextRequest){
         addSrcset(source.getAttribute("data-srcset"));
       });
 
-      document.querySelectorAll("*").forEach(node=>{
+      document.querySelectorAll(
+        '[style*="background"],[data-image],[data-image-url],[data-zoom-image],[data-full-image],video[poster]'
+      ).forEach(node=>{
         const el=node as HTMLElement;
         const bg=getComputedStyle(el).backgroundImage;
         if(bg&&bg!=="none"){
