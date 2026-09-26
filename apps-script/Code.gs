@@ -141,8 +141,20 @@ function savePublish_(request){
   all.forEach(p=>{
     if(ids.has(p.id)||urls.has(p.affiliateUrl))throw new Error('Produk duplikat dalam batch');
     ids.add(p.id);urls.add(p.affiliateUrl);
-    if(existing.some(x=>x.affiliateUrl===p.affiliateUrl&&x.id!==p.id))throw new Error('Link affiliate sudah dipakai produk lain');
+
+    if(existing.some(x=>x.affiliateUrl===p.affiliateUrl&&x.id!==p.id)){
+      const e=new Error('Link affiliate sudah dipakai produk lain');
+      e.code='DUPLICATE';
+      throw e;
+    }
+
     const current=existing.find(x=>x.id===p.id);
+    if(current&&current.affiliateUrl!==p.affiliateUrl){
+      const e=new Error('Product ID sudah ada di katalog. Affiliate link baru tidak boleh menimpa produk yang sudah tersimpan.');
+      e.code='DUPLICATE';
+      throw e;
+    }
+
     p.sequence=current?current.sequence:++sequence;
   });
   all.forEach(p=>{upsert_(DRAFT_SHEET,p);upsert_(PUBLISHED_SHEET,p)});
