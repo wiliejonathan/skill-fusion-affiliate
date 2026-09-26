@@ -2,7 +2,7 @@
 
 import {backendFetch as fetch,clearAdminKey,getStoredAdminKey,verifyAdminKey} from "@/lib/backend";
 import {useEffect,useMemo,useState} from "react";
-import {CheckCircle2,CopyCheck,ExternalLink,LayoutDashboard,Link2,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
+import {CheckCircle2,ClipboardPaste,CopyCheck,ExternalLink,LayoutDashboard,Link2,List,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
 import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
@@ -206,6 +206,31 @@ function validBlibliSource(...candidates:(string|null|undefined)[]){
   return "";
 }
 
+type ImportMode="single"|"multiple";
+
+function extractHttpLinks(raw:string){
+  const marked=String(raw||"").replace(/(?=https?:\/\/)/gi,"\n");
+  const links:string[]=[];
+
+  for(const line of marked.split(/\r?\n/)){
+    const match=line.match(/https?:\/\/[^\s<>"']+/i);
+    if(!match?.[0]) continue;
+
+    const cleaned=match[0].replace(/[),.;]+$/,"").trim();
+    if(cleaned&&!links.includes(cleaned)) links.push(cleaned);
+  }
+
+  return links;
+}
+
+function normalizeImportText(raw:string,mode:ImportMode){
+  const links=extractHttpLinks(raw);
+  if(mode==="single"){
+    return links[0]||String(raw||"").replace(/[\r\n]+/g," ").trim();
+  }
+  return links.join("\n");
+}
+
 function productIdFromBlibliUrl(value:string){
   try{
     const u=new URL(value);
@@ -371,6 +396,7 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
 
 export default function AdminPage(){
   const [text,setText]=useState("");
+  const [importMode,setImportMode]=useState<ImportMode>("single");
   const [authReady,setAuthReady]=useState(false);
   const [authenticated,setAuthenticated]=useState(false);
   const [loginPassword,setLoginPassword]=useState("");
@@ -521,13 +547,55 @@ export default function AdminPage(){
     window.localStorage.setItem(STORAGE_DIRTY_KEY,JSON.stringify(dirtyUrls));
   },[catalog,resolved,dirtyUrls,hydrated]);
 
+  function switchImportMode(mode:ImportMode){
+    setImportMode(mode);
+    setText(current=>normalizeImportText(current,mode));
+    setNotice("");
+  }
+
+  function handleImportTextChange(value:string){
+    if(importMode==="single"){
+      const links=extractHttpLinks(value);
+      if(links.length){
+        setText(links[0]);
+        return;
+      }
+      setText(value.replace(/[\r\n]+/g," "));
+      return;
+    }
+    setText(value);
+  }
+
+  function handleImportPaste(event:React.ClipboardEvent<HTMLTextAreaElement>){
+    const pasted=event.clipboardData.getData("text");
+    if(!pasted) return;
+    event.preventDefault();
+    setText(normalizeImportText(pasted,importMode));
+    setNotice("");
+  }
+
+  async function pasteImportLinks(){
+    try{
+      const pasted=await navigator.clipboard.readText();
+      if(!pasted.trim()){
+        setNotice("Clipboard kosong.");
+        return;
+      }
+      setText(normalizeImportText(pasted,importMode));
+      setNotice("");
+    }catch{
+      setNotice("Clipboard tidak dapat dibaca. Izinkan akses clipboard di browser lalu coba lagi.");
+    }
+  }
+
   const checks=useMemo(()=>{
-    const lines=[...new Set(text.split(/\r?\n|\s+(?=https?:\/\/)/).map(x=>x.trim()).filter(Boolean))];
+    const detected=extractHttpLinks(text);
+    const lines=importMode==="single"?detected.slice(0,1):detected;
     const candidates:Array<ImportCandidate|{invalidUrl:string}>=lines.map(line=>{
       try{return parseBlibliImportUrl(line)}catch{return {invalidUrl:line}}
     });
     return checkImports(candidates,catalog);
-  },[text,catalog]);
+  },[text,catalog,importMode]);
 
   const counts=checks.reduce((acc,row)=>{acc[row.status]=(acc[row.status]||0)+1;return acc},{} as Record<string,number>);
 
@@ -1075,9 +1143,54 @@ export default function AdminPage(){
 
       <section className="panel" id="import">
         <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Produk yang berhasil di-import langsung disimpan ke database bersama dan muncul di Client.</p></div><CopyCheck size={24}/></div>
-        <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"Paste satu atau banyak link, satu link per baris\nhttps://s.blibli.com/GNtk/..."} />
+
+        <div className="import-mode-bar">
+          <button
+            type="button"
+            className={importMode==="single"?"import-mode active":"import-mode"}
+            onClick={()=>switchImportMode("single")}
+          >
+            <Link2 size={16}/> Single Link
+          </button>
+          <button
+            type="button"
+            className={importMode==="multiple"?"import-mode active":"import-mode"}
+            onClick={()=>switchImportMode("multiple")}
+          >
+            <List size={16}/> Multiple Link
+          </button>
+        </div>
+
+        <div className={"import-textarea-wrap "+(importMode==="single"?"single":"multiple")}>
+          <textarea
+            value={text}
+            onChange={e=>handleImportTextChange(e.target.value)}
+            onPaste={handleImportPaste}
+            placeholder={importMode==="single"
+              ?"https://s.blibli.com/GNtk/..."
+              :"Paste link sebanyak apa pun. Sistem otomatis memisahkan setiap URL yang diawali http/https."
+            }
+          />
+          <button
+            type="button"
+            className="paste-icon-btn"
+            onClick={pasteImportLinks}
+            aria-label="Paste link dari clipboard"
+            title="Paste link dari clipboard"
+          >
+            <ClipboardPaste size={20}/>
+          </button>
+        </div>
+
+        {importMode==="multiple"&&<div className="multiple-link-hint">
+          Setiap <strong>http://</strong> atau <strong>https://</strong> yang terdeteksi otomatis dianggap sebagai link/baris baru.
+        </div>}
+
         <div className="actions">
-          <p><CheckCircle2 size={16}/> Sistem resolve shortlink, membaca Product ID, mengecek duplicate, lalu sinkron ke Client.</p>
+          <p><CheckCircle2 size={16}/> {importMode==="single"
+            ?"Single Link aktif — hanya 1 link yang akan diproses."
+            :"Multiple Link aktif — link berantakan otomatis dipisah, dirapikan, dicek duplicate, lalu diproses satu per satu."
+          }</p>
           <button onClick={analyzeLinks} disabled={busy||!checks.length}>{busy?"Mengimpor...":"Import Produk"}</button>
         </div>
         {notice&&<div className="notice">{notice}</div>}
