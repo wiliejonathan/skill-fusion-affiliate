@@ -584,7 +584,7 @@ export default function AdminPage(){
 
     if(!newItems.length){
       const detail=failedMessages[0]||"Metadata atau koneksi backend belum siap.";
-      setNotice("Import gagal: "+detail+" Tidak ada produk yang disimpan.");
+      setNotice("Import gagal [Resolver v4]: "+detail+" Tidak ada produk yang disimpan.");
       setBusy(false);
       return;
     }
