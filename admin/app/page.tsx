@@ -344,6 +344,14 @@ export default function AdminPage(){
     const item=baseCatalog.find(x=>x.affiliateUrl===url);
     const previous=baseResolved[url];
 
+    const previousImages=previous?.images?.length
+      ? previous.images
+      : (previous?.image?[previous.image]:[]);
+    const domImages=data.images?.length
+      ? data.images
+      : (data.image?[data.image]:[]);
+    const nextImages=domImages.length>=previousImages.length?domImages:previousImages;
+
     const merged:ResolvedProduct={
       ...previous,
       ...data,
@@ -351,8 +359,8 @@ export default function AdminPage(){
       title:data.title||previous?.title||"Produk Blibli",
       canonicalUrl:data.canonicalUrl||previous?.canonicalUrl||item?.canonicalUrl||null,
       canonicalProductId:data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null,
-      image:data.images?.[0]||data.image||previous?.images?.[0]||previous?.image||null,
-      images:data.images?.length?data.images:(previous?.images||[])
+      image:nextImages[0]||data.image||previous?.image||null,
+      images:nextImages
     };
 
     return {
@@ -426,7 +434,7 @@ export default function AdminPage(){
 
       setProductNotice(prev=>({
         ...prev,
-        [url]:`✓ Reload DOM selesai · ${next.merged.images?.length||0} foto di Admin · tekan Refresh Data untuk kirim ke Client`
+        [url]:`✓ Reload DOM selesai · ${data.images?.length||0} foto dibaca dari DOM · ${next.merged.images?.length||0} foto tersimpan di Admin · tekan Refresh Data untuk kirim ke Client`
       }));
     }catch(error){
       setProductNotice(prev=>({
@@ -493,7 +501,7 @@ export default function AdminPage(){
 
           setProductNotice(prev=>({
             ...prev,
-            [url]:`✓ Reload DOM · ${next.merged.images?.length||0} foto di Admin`
+            [url]:`✓ Reload DOM · ${data.images?.length||0} dibaca · ${next.merged.images?.length||0} foto di Admin`
           }));
         }catch(error){
           failed++;
