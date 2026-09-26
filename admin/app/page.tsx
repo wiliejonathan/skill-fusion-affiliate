@@ -1,6 +1,6 @@
 "use client";
 
-import {backendFetch as fetch} from "@/lib/backend";
+import {backendFetch as fetch,clearAdminKey,getStoredAdminKey,verifyAdminKey} from "@/lib/backend";
 import {useEffect,useMemo,useState} from "react";
 import {CheckCircle2,CopyCheck,ExternalLink,LayoutDashboard,Link2,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
@@ -134,6 +134,12 @@ function dbToLocal(products:DbProduct[]){
 
 export default function AdminPage(){
   const [text,setText]=useState("");
+  const [authReady,setAuthReady]=useState(false);
+  const [authenticated,setAuthenticated]=useState(false);
+  const [loginPassword,setLoginPassword]=useState("");
+  const [rememberLogin,setRememberLogin]=useState(true);
+  const [loginBusy,setLoginBusy]=useState(false);
+  const [loginError,setLoginError]=useState("");
   const [catalog,setCatalog]=useState<CatalogIdentity[]>(initialCatalog);
   const [resolved,setResolved]=useState<Record<string,ResolvedProduct>>(initialResolved);
   const [busy,setBusy]=useState(false);
@@ -145,6 +151,44 @@ export default function AdminPage(){
   const [bulkAction,setBulkAction]=useState<null|"refresh"|"reload">(null);
   const [dirtyUrls,setDirtyUrls]=useState<string[]>([]);
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
+
+  async function applyServerProducts(products:DbProduct[]){
+    const server=dbToLocal(products);
+    setCatalog(server.catalog);
+    setResolved(server.resolved);
+    setDirtyUrls([]);
+    setServerReady(true);
+  }
+
+  async function loginAdmin(password=loginPassword,remember=rememberLogin){
+    if(!password.trim()){
+      setLoginError("Masukkan password Admin.");
+      return;
+    }
+    setLoginBusy(true);
+    setLoginError("");
+    try{
+      const data=await verifyAdminKey(password,remember);
+      if(!data?.ok||!Array.isArray(data.products)) throw new Error(data?.message||"Password Admin salah.");
+      await applyServerProducts(data.products as DbProduct[]);
+      setAuthenticated(true);
+      setLoginPassword("");
+    }catch(error){
+      setAuthenticated(false);
+      setLoginError(error instanceof Error?error.message:"Password Admin salah.");
+    }finally{
+      setLoginBusy(false);
+      setAuthReady(true);
+    }
+  }
+
+  function logoutAdmin(){
+    clearAdminKey();
+    setAuthenticated(false);
+    setServerReady(false);
+    setLoginPassword("");
+    setLoginError("");
+  }
 
   async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
     const products=buildDbProducts(nextCatalog,nextResolved);
@@ -194,45 +238,40 @@ export default function AdminPage(){
           }));
         }
       }
-
       if(savedResolved){
         const parsed=JSON.parse(savedResolved);
-        if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
-          loadedResolved=parsed;
-        }
+        if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)) loadedResolved=parsed;
       }
-
       if(savedDirty){
         const parsed=JSON.parse(savedDirty);
-        if(Array.isArray(parsed)){
-          loadedDirty=parsed.filter((value:unknown):value is string=>typeof value==="string");
-        }
+        if(Array.isArray(parsed)) loadedDirty=parsed.filter((value:unknown):value is string=>typeof value==="string");
       }
     }catch{
-      setNotice("Data lokal sebelumnya tidak bisa dibaca. Mengambil katalog server.");
+      // Cached catalog is only a visual fallback. Server Draft remains authoritative.
     }
 
     setCatalog(loadedCatalog);
     setResolved(loadedResolved);
     setDirtyUrls(loadedDirty);
+    setHydrated(true);
+
+    const stored=getStoredAdminKey();
+    if(!stored){
+      setAuthReady(true);
+      return;
+    }
 
     (async()=>{
       try{
-        const res=await fetch("/api/catalog",{cache:"no-store"});
-        const data=await res.json();
-
-        if(data?.ok&&Array.isArray(data.products)){
-          const server=dbToLocal(data.products as DbProduct[]);
-          setServerReady(true);
-          // Shared Draft is authoritative; never resurrect deleted rows from a device cache.
-          setCatalog(server.catalog);
-          setResolved(server.resolved);
-          setDirtyUrls([]);
-        }
+        const data=await verifyAdminKey(stored,Boolean(window.localStorage.getItem("skillfusion:adminKey")));
+        if(!data?.ok||!Array.isArray(data.products)) throw new Error("Sesi Admin tidak valid.");
+        await applyServerProducts(data.products as DbProduct[]);
+        setAuthenticated(true);
       }catch{
-        setNotice("Koneksi database belum siap. Data Admin lokal tetap dipertahankan.");
+        clearAdminKey();
+        setAuthenticated(false);
       }finally{
-        setHydrated(true);
+        setAuthReady(true);
       }
     })();
   },[]);
@@ -552,6 +591,46 @@ export default function AdminPage(){
     }
   }
 
+  if(!authReady){
+    return <main className="admin-login-page"><div className="admin-login-card admin-login-loading"><div className="mark">SF</div><p>Memeriksa sesi Admin...</p></div></main>;
+  }
+
+  if(!authenticated){
+    return <main className="admin-login-page">
+      <section className="admin-login-card">
+        <div className="admin-login-brand">
+          <div className="mark">SF</div>
+          <div><strong>Skill Fusion</strong><small>ADMIN ACCESS</small></div>
+        </div>
+        <span className="eyebrow">SECURE ADMIN</span>
+        <h1>Masuk ke Admin</h1>
+        <p className="admin-login-copy">Masukkan password Admin untuk mengelola katalog Skill Fusion.</p>
+        <form onSubmit={e=>{e.preventDefault();void loginAdmin();}}>
+          <label className="admin-login-label" htmlFor="admin-password">Password Admin</label>
+          <input
+            id="admin-password"
+            type="password"
+            autoComplete="current-password"
+            value={loginPassword}
+            onChange={e=>setLoginPassword(e.target.value)}
+            placeholder="Masukkan password"
+            disabled={loginBusy}
+            autoFocus
+          />
+          <label className="admin-remember">
+            <input type="checkbox" checked={rememberLogin} onChange={e=>setRememberLogin(e.target.checked)} disabled={loginBusy}/>
+            <span><strong>Remember me</strong><small>Simpan login di perangkat ini sampai Anda logout.</small></span>
+          </label>
+          {loginError&&<div className="admin-login-error">{loginError}</div>}
+          <button className="admin-login-button" type="submit" disabled={loginBusy||!loginPassword.trim()}>
+            {loginBusy?"Memeriksa...":"Masuk ke Admin"}
+          </button>
+        </form>
+        <div className="admin-login-security"><ShieldCheck size={17}/><span>Password diverifikasi langsung ke backend Apps Script.</span></div>
+      </section>
+    </main>;
+  }
+
   return <main className="shell">
     <aside>
       <div className="brand"><div className="mark">SF</div><div><strong>Skill Fusion</strong><small>ADMIN</small></div></div>
@@ -585,7 +664,7 @@ export default function AdminPage(){
               {bulkAction==="reload"?"Reloading All...":"Reload All"}
             </button>
           </div>
-          <div className="pill">ADMIN</div>
+          <button className="admin-logout" onClick={logoutAdmin}>Logout</button><div className="pill">ADMIN</div>
         </div>
       </header>
 
