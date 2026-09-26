@@ -6,6 +6,7 @@ import {AtSign,Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2
 import BrandLogo from "./BrandLogo";
 import type {Product} from "@/lib/products";
 import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
+import {requestAppsScript} from "@/shared/apps-script";
 
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
 const IG_BRAND="https://www.instagram.com/skill.fusion.id/";
@@ -15,20 +16,44 @@ export default function ProductDetail({product}:{product:Product}){
   const [liked,setLiked]=useState(false);
   const [lightbox,setLightbox]=useState(false);
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
+  const [livePrice,setLivePrice]=useState({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:false});
   const images=product.images||[];
   const count=images.length;
   const formattedPrice=useMemo(()=>{
-    const raw=String(product.price||"").trim();
+    const raw=String(livePrice.price||"").trim();
     if(!raw) return null;
     const numeric=Number(raw.replace(/[^0-9]/g,""));
     if(!Number.isFinite(numeric)||numeric<=0) return null;
-    if((product.currency||"IDR").toUpperCase()==="IDR"){
+    if((livePrice.currency||"IDR").toUpperCase()==="IDR"){
       return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(numeric);
     }
-    return `${product.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
-  },[product.price,product.currency]);
+    return `${livePrice.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
+  },[livePrice.price,livePrice.currency]);
   const description=String(product.description||"").trim()||
     `${product.name} adalah produk ${product.category.toLowerCase()} dari ${product.brand}. ${product.features.length?`Fitur utama: ${product.features.join(", ")}.`:""}`;
+
+  useEffect(()=>{
+    let mounted=true;
+    setLivePrice({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:true});
+
+    async function refreshLivePrice(){
+      try{
+        const data=await requestAppsScript("price",{id:product.id});
+        if(!mounted)return;
+        setLivePrice({
+          price:data?.price||product.price||null,
+          currency:data?.currency||product.currency||null,
+          updatedAt:data?.priceUpdatedAt||product.priceUpdatedAt||null,
+          loading:false
+        });
+      }catch{
+        if(mounted)setLivePrice(prev=>({...prev,loading:false}));
+      }
+    }
+
+    refreshLivePrice();
+    return ()=>{mounted=false};
+  },[product.id,product.price,product.currency,product.priceUpdatedAt]);
 
   useEffect(()=>{
     setLiked(readWishlist().includes(product.id));
@@ -140,7 +165,7 @@ export default function ProductDetail({product}:{product:Product}){
           <div className="detail-price-box">
             <span>LIVE MARKET PRICE</span>
             <strong>{formattedPrice||"CHECK @ BLIBLI"}</strong>
-            <small>Harga, promo, varian, dan stok diperbarui di halaman merchant saat penawaran dibuka.</small>
+            <small>{livePrice.loading?"Memeriksa harga Blibli terbaru...":livePrice.updatedAt?"Live cache diperbarui "+new Date(livePrice.updatedAt).toLocaleString("id-ID"):"Harga, promo, varian, dan stok mengikuti halaman merchant."}</small>
           </div>
 
           <div className="detail-description">
