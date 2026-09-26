@@ -107,6 +107,13 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
   return products;
 }
 
+function isUsableProductTitle(title:string|null|undefined){
+  const value=String(title||"").trim();
+  if(!value) return false;
+  if(/online mall blibli|belanja online aman|blibli\.com/i.test(value)) return false;
+  return value.length>5;
+}
+
 function sanitizeProductImages(images:string[]){
   const seen=new Set<string>();
   const out:string[]=[];
@@ -421,7 +428,7 @@ export default function AdminPage(){
       ...previous,
       ...data,
       inputUrl:url,
-      title:data.title||previous?.title||"Produk Blibli",
+      title:isUsableProductTitle(data.title)?data.title:(previous?.title||"Produk Blibli"),
       canonicalUrl:data.canonicalUrl||previous?.canonicalUrl||item?.canonicalUrl||null,
       canonicalProductId:data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null,
       image:nextImages[0]||data.image||previous?.image||null,
