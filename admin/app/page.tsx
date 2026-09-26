@@ -388,6 +388,7 @@ export default function AdminPage(){
   const [bulkAction,setBulkAction]=useState<null|"refresh"|"reload">(null);
   const [dirtyUrls,setDirtyUrls]=useState<string[]>([]);
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
+  const [duplicatePopup,setDuplicatePopup]=useState<{title:string;items:string[]}|null>(null);
 
   async function applyServerProducts(products:DbProduct[]){
     const server=dbToLocal(products);
@@ -533,7 +534,16 @@ export default function AdminPage(){
   async function analyzeLinks(){
     const ready=checks.filter(x=>x.status==="READY");
     if(!ready.length){
-      setNotice(checks.some(x=>x.status==="DUPLICATE")?"Produk sudah ada di katalog. Tidak dibuat duplikat.":"Tidak ada link baru yang valid.");
+      const duplicates=checks.filter(x=>x.status==="DUPLICATE");
+      if(duplicates.length){
+        setDuplicatePopup({
+          title:duplicates.length>1?"Link duplicate ditemukan":"Link duplicate ditemukan",
+          items:duplicates.map(row=>`${row.inputUrl} — ${row.reason}`)
+        });
+        setNotice("Produk sudah ada di katalog. Tidak dibuat duplikat.");
+      }else{
+        setNotice("Tidak ada link baru yang valid.");
+      }
       return;
     }
 
@@ -545,6 +555,7 @@ export default function AdminPage(){
     let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
     let imported=0;
     let resolvedDuplicates=0;
+    const resolvedDuplicateItems:string[]=[];
     let failedImports=0;
     const failedMessages:string[]=[];
 
@@ -585,6 +596,10 @@ export default function AdminPage(){
         );
         if(duplicate){
           resolvedDuplicates++;
+          const existingLabel=duplicate.canonicalProductId||duplicate.canonicalUrl||duplicate.affiliateUrl||"produk yang sudah ada";
+          resolvedDuplicateItems.push(
+            `${item.inputUrl} → ${productId} sudah ada sebagai ${existingLabel}`
+          );
           continue;
         }
 
@@ -682,6 +697,13 @@ export default function AdminPage(){
     setText("");
     setDirtyUrls(prev=>prev.filter(url=>!nextCatalog.some(item=>item.affiliateUrl===url)));
     setServerReady(true);
+
+    if(resolvedDuplicateItems.length){
+      setDuplicatePopup({
+        title:resolvedDuplicateItems.length>1?"Beberapa duplicate ditemukan":"Produk duplicate ditemukan",
+        items:resolvedDuplicateItems
+      });
+    }
 
     if(imported){
       setNotice(
@@ -997,6 +1019,17 @@ export default function AdminPage(){
   }
 
   return <main className="shell">
+    {duplicatePopup&&<div className="duplicate-modal-backdrop" role="presentation" onClick={()=>setDuplicatePopup(null)}>
+      <section className="duplicate-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-modal-title" onClick={e=>e.stopPropagation()}>
+        <div className="duplicate-modal-icon">!</div>
+        <h2 id="duplicate-modal-title">{duplicatePopup.title}</h2>
+        <p>Link ini tidak di-import ulang karena mengarah ke produk yang sudah ada di katalog.</p>
+        <div className="duplicate-modal-items">
+          {duplicatePopup.items.map((item,index)=><div className="duplicate-modal-item" key={index}>{item}</div>)}
+        </div>
+        <button type="button" onClick={()=>setDuplicatePopup(null)}>OK, Mengerti</button>
+      </section>
+    </div>}
     <aside>
       <div className="brand"><div className="mark">SF</div><div><strong>Skill Fusion</strong><small>ADMIN</small></div></div>
       <nav>
