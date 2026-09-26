@@ -163,17 +163,17 @@ function reloadFromBlibli_(p){
   if(p.id&&id!==p.id)throw new Error('Product ID berubah; data lama dipertahankan');
   const html=fetchText_(canonical);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
-  const htmlImages=extractProductImages_(html,canonical);
+  const htmlImages=extractBlibliGallery_(html,canonical);
   let gathered=htmlImages.slice();
   const summary=summaryData_(canonical,id);
-  if(summary.title)title=summary.title;
+  if(isUsableProductTitle_(summary.title))title=summary.title;
   gathered=gathered.concat(summary.images);
-  gathered=gathered.concat(officialImages_(id));
-  gathered=gathered.concat(p.images||[]);
   const gallery=rankProductImages_(gathered,id).slice(0,40);
+  const finalGallery=gallery.length?gallery:(p.images||[]);
   const price=pick_(html,[/<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,/"price"\s*:\s*"?([0-9.]+)"?/i])||p.price||'';
   const currency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||p.currency||'';
-  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:gallery,price:price,currency:currency,source:'blibli-reload'});
+  if(!isUsableProductTitle_(title))title=p.name;
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,source:'blibli-reload'});
 }
 function resolveUrl_(url){
   let current=url,html='';
@@ -203,7 +203,7 @@ function summaryData_(canonical,id){
   const endpoints=['https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'];
   const productSku=id.replace(/-\d{5}$/,'');if(productSku!==id)endpoints.push('https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false');
   let title='',images=[];
-  endpoints.forEach(u=>{const j=fetchJson_(u,canonical);if(!j)return;const data=j.data||j;if(data&&data.name)title=String(data.name);images=images.concat(extractProductImages_(JSON.stringify(data),canonical))});
+  endpoints.forEach(u=>{const j=fetchJson_(u,canonical);if(!j)return;const data=j.data||j;if(data&&data.name)title=String(data.name);images=images.concat(extractBlibliGallery_(JSON.stringify(data),canonical))});
   return {title:title,images:rankProductImages_(images,id)};
 }
 function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
@@ -245,6 +245,15 @@ function extractProductImages_(text,baseUrl){
   urls.forEach(add);
   return rankProductImages_(out,'');
 }
+function isUsableProductTitle_(title){
+  const v=String(title||'').trim();
+  return !!v && !/online mall blibli|belanja online aman|blibli\.com/i.test(v) && v.length>5;
+}
+function extractBlibliGallery_(text,baseUrl){
+  return extractProductImages_(text,baseUrl).filter(function(url){
+    return /^https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\//i.test(url);
+  });
+}
 function rankProductImages_(images,id){
   const seen={},rows=[];
   (images||[]).forEach((raw,index)=>{
@@ -264,14 +273,7 @@ function rankProductImages_(images,id){
   rows.sort((a,b)=>b.score-a.score||a.index-b.index);
   return rows.map(x=>x.url);
 }
-function officialImages_(id){
-  const urls={
-    'XIO-60022-01141-00001':'https://www.mi.co.id/id/product/xiaomi-6a-type-a-to-type-c-cable/',
-    'ACO-60021-00234-00001':'https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c',
-    'ACO-60021-00122-00005':'https://acmic.id/products/acmic-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable'
-  };
-  if(!urls[id])return [];const h=fetchText_(urls[id]).replace(/\\u0026/ig,'&');const regex=/https:\/\/(?:acmic\.id\/cdn\/shop\/files|cdn\.shopify\.com\/s\/files|i02\.appmifile\.com)\/[^"'\\\s<>]+/ig;return unique_(h.match(regex)||[]).slice(0,30)
-}
+
 function productId_(url){const m=String(url||'').match(/\/is--([^/?#]+)/i);return m?m[1]:''}
 function pick_(text,patterns){for(let i=0;i<patterns.length;i++){const m=String(text||'').match(patterns[i]);if(m&&m[1])return String(m[1]).replace(/&amp;/g,'&').trim()}return ''}
 function unique_(arr){return Array.from(new Set((arr||[]).filter(Boolean)))}
