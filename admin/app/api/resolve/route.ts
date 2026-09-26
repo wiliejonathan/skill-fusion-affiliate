@@ -235,7 +235,7 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
           .filter((x:unknown):x is string=>typeof x==="string")
           .map(normalizeCatalogImageUrl)
           .filter(isBlibliCatalogImage)
-          .filter(src=>!productCode||src.toUpperCase().includes(productCode.toUpperCase()));
+          .filter((src:string)=>!productCode||src.toUpperCase().includes(productCode.toUpperCase()));
 
         // Blibli's _summary response can expose only 1-2 selected-SKU images in
         // data.images while the rest of the visible product media sits under
