@@ -1,6 +1,6 @@
 "use client";
 
-import {useState} from "react";
+import {useMemo,useState} from "react";
 import {useRouter} from "next/navigation";
 import {Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2} from "lucide-react";
 import type {Product} from "@/lib/products";
@@ -16,6 +16,24 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   const images=p.images||[];
   const count=images.length;
   const detailUrl=`/product?id=${encodeURIComponent(p.id)}`;
+
+  const formattedPrice=useMemo(()=>{
+    const raw=String(p.price||"").trim();
+    if(!raw) return null;
+
+    const numeric=Number(raw.replace(/[^0-9]/g,""));
+    if(!Number.isFinite(numeric)||numeric<=0) return null;
+
+    if((p.currency||"IDR").toUpperCase()==="IDR"){
+      return new Intl.NumberFormat("id-ID",{
+        style:"currency",
+        currency:"IDR",
+        maximumFractionDigits:0
+      }).format(numeric);
+    }
+
+    return `${p.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
+  },[p.price,p.currency]);
 
   function openDetail(){
     if(navigating) return;
@@ -113,7 +131,14 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
         <h3><span className="product-sequence">#{String(p.sequence).padStart(3,"0")}</span> {p.name}</h3>
         <div className="product-id-line"><ScanLine size={13}/><span>{p.canonicalProductId}</span></div>
         <div className="feature-list">{p.features.map(x=><span key={x}>{x}</span>)}</div>
-        <div className="price-block"><strong>LIVE PRICE @ BLIBLI</strong><div><span className="live-note">Harga & stok mengikuti halaman merchant.</span></div></div>
+        <div className="price-block">
+          <strong>LIVE PRICE @ BLIBLI</strong>
+          {formattedPrice
+            ? <div className="live-price">{formattedPrice}</div>
+            : <div className="live-price pending">Harga mengikuti Blibli</div>
+          }
+          <span className="live-note">Harga & stok mengikuti halaman merchant.</span>
+        </div>
         <div className="card-detail-hint">OPEN PRODUCT INTELLIGENCE →</div>
         <a className="cta-btn" href={p.affiliateUrl} target="_blank" rel="sponsored noreferrer" onClick={stop}>Buka di Blibli <ExternalLink size={15}/></a>
       </div>
