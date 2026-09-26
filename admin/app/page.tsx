@@ -304,12 +304,20 @@ export default function AdminPage(){
     setText("");
 
     try{
-      const products=await pushDatabase(merged,next);
-      if(products){
-        const local=dbToLocal(products);
-        setCatalog(local.catalog);
-        setResolved(local.resolved);
+      const newUrls=new Set(newItems.map(item=>item.affiliateUrl).filter((x):x is string=>Boolean(x)));
+      const products=buildDbProducts(merged,next).filter(product=>newUrls.has(product.affiliateUrl));
+
+      if(products.length){
+        const res=await fetch("/api/catalog",{
+          method:"POST",
+          headers:{"content-type":"application/json"},
+          body:JSON.stringify({products})
+        });
+        const data=await res.json();
+        if(!res.ok||!data?.ok) throw new Error(data?.message||"Database sync gagal");
+        setServerReady(true);
       }
+
       setNotice(`${newItems.length} produk baru berhasil di-import dan langsung disinkronkan ke Client.`);
     }catch{
       setNotice(`${newItems.length} produk masuk lokal, tetapi sinkron database gagal. Coba Refresh Data.`);
@@ -385,12 +393,11 @@ export default function AdminPage(){
     setProductNotice(prev=>({...prev,[url]:"Mengirim ulang data Admin ke Client..."}));
 
     try{
-      const synced=await pushSingleProduct(url);
-      const local=dbToLocal(synced);
-      setCatalog(local.catalog);
-      setResolved(local.resolved);
+      await pushSingleProduct(url);
 
-      const refreshed=local.resolved[url]||resolved[url];
+      // Do not replace the whole Admin workspace with the database response.
+      // Other products may have Reload DOM changes that have not been synced yet.
+      const refreshed=resolved[url];
       setProductNotice(prev=>({
         ...prev,
         [url]:refreshed?.images?.length
