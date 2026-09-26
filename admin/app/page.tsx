@@ -1211,7 +1211,7 @@ export default function AdminPage(){
       <section className="panel" id="products">
         <div className="panel-title"><div><span className="eyebrow">PRODUCTS</span><h2>Katalog aktif</h2><p>Katalog ini adalah sumber yang sama dengan website Client.</p></div></div>
         <div className="product-admin-list">
-          {catalog.map((item,i)=>{
+          {[...catalog].sort((a,b)=>(b.sequence||0)-(a.sequence||0)).map((item,i)=>{
             const url=item.affiliateUrl||"";
             const meta=resolved[url];
             return <article className="admin-product" key={url||i}>
