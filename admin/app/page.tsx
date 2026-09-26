@@ -8,7 +8,7 @@ import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
 type ResolvedProduct={
   inputUrl:string; finalUrl:string; canonicalUrl:string|null; canonicalProductId:string|null;
-  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; ok:boolean; message?:string;
+  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; description?:string|null; ok:boolean; message?:string;
 };
 
 type DbProduct={
@@ -25,6 +25,7 @@ type DbProduct={
   features:string[];
   price:string|null;
   currency:string|null;
+  description?:string|null;
 };
 
 const FIRST_LINK="https://s.blibli.com/GNtk/0qrtsw3f";
@@ -101,7 +102,8 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
       badge:"Blibli Affiliate",
       features:inferFeatures(name),
       price:meta?.price||null,
-      currency:meta?.currency||null
+      currency:meta?.currency||null,
+      description:meta?.description||null
     });
   });
   return products;
@@ -192,6 +194,7 @@ function dbToLocal(products:DbProduct[]){
       images:p.images||[],
       price:p.price||null,
       currency:p.currency||null,
+      description:p.description||null,
       ok:true
     };
   }
