@@ -11,7 +11,8 @@ function pick(html:string,patterns:RegExp[]){
 }
 
 const OFFICIAL_FALLBACK_PAGES:Record<string,string>={
-  "ACO-60021-00122-00005":"https://acmic.id/products/acmic-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable"
+  "ACO-60021-00122-00005":"https://acmic.id/products/acmic-cfc100-kabel-data-charger-usb-type-c-100cm-fast-charging-cable",
+  "ACO-60021-00234-00001":"https://acmic.id/products/acmic-pdc100-power-delivery-pd-100cm-cable-usb-type-c-to-usb-type-c"
 };
 
 const KNOWN_IMAGE_GALLERIES:Record<string,string[]>={
@@ -485,8 +486,13 @@ export async function GET(req:NextRequest){
       if(!images.length){
         images=await fetchSeoListingImages(current,productId,title);
       }
-      if(!images.length){
-        images=await fetchOfficialFallbackImages(productId);
+
+      // If Blibli temporarily exposes only a tiny gallery server-side, use the
+      // manufacturer's product page as a last-resort enrichment source. Never
+      // replace a larger Blibli gallery with a smaller fallback.
+      if(images.length<4){
+        const officialFallback=await fetchOfficialFallbackImages(productId);
+        if(officialFallback.length>images.length) images=officialFallback;
       }
 
       // Keep only one coherent product-gallery asset group when possible.
