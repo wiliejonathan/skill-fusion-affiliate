@@ -152,13 +152,14 @@ function chooseDominantGallery(images:string[]){
 
 function collectBlibliGalleryImages(value:any,productCode:string|null){
   const found:string[]=[];
+  const assetCode=productCode&&/^MTA-\d+$/i.test(productCode)?productCode:null;
 
   function visit(node:any,keyHint:string){
     if(typeof node==="string"){
       if(!/(image|gallery|media|photo|picture)/i.test(keyHint)) return;
       const src=normalizeCatalogImageUrl(node);
       if(!isBlibliCatalogImage(src)) return;
-      if(productCode&&!src.toUpperCase().includes(productCode.toUpperCase())) return;
+      if(assetCode&&!src.toUpperCase().includes(assetCode.toUpperCase())) return;
       if(!found.includes(src)) found.push(src);
       return;
     }
@@ -229,13 +230,14 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
         const payload=await res.json();
         const data=payload?.data||payload;
         const productCode=typeof data?.productCode==="string"?data.productCode:null;
+        const assetCode=productCode&&/^MTA-\d+$/i.test(productCode)?productCode:null;
 
         const directImages=(Array.isArray(data?.images)?data.images:[])
           .map(imageFromSummaryItem)
           .filter((x:unknown):x is string=>typeof x==="string")
           .map(normalizeCatalogImageUrl)
           .filter(isBlibliCatalogImage)
-          .filter((src:string)=>!productCode||src.toUpperCase().includes(productCode.toUpperCase()));
+          .filter((src:string)=>!assetCode||src.toUpperCase().includes(assetCode.toUpperCase()));
 
         // Blibli's _summary response can expose only 1-2 selected-SKU images in
         // data.images while the rest of the visible product media sits under
