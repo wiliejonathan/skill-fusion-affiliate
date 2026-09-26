@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
 import Link from "next/link";
 import {AtSign,Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2,X,ZoomIn} from "lucide-react";
 import BrandLogo from "./BrandLogo";
@@ -17,6 +17,16 @@ export default function ProductDetail({product}:{product:Product}){
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const images=product.images||[];
   const count=images.length;
+  const formattedPrice=useMemo(()=>{
+    const raw=String(product.price||"").trim();
+    if(!raw) return null;
+    const numeric=Number(raw.replace(/[^0-9]/g,""));
+    if(!Number.isFinite(numeric)||numeric<=0) return null;
+    if((product.currency||"IDR").toUpperCase()==="IDR"){
+      return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(numeric);
+    }
+    return `${product.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
+  },[product.price,product.currency]);
   const description=String(product.description||"").trim()||
     `${product.name} adalah produk ${product.category.toLowerCase()} dari ${product.brand}. ${product.features.length?`Fitur utama: ${product.features.join(", ")}.`:""}`;
 
@@ -129,7 +139,7 @@ export default function ProductDetail({product}:{product:Product}){
 
           <div className="detail-price-box">
             <span>LIVE MARKET PRICE</span>
-            <strong>CHECK @ BLIBLI</strong>
+            <strong>{formattedPrice||"CHECK @ BLIBLI"}</strong>
             <small>Harga, promo, varian, dan stok diperbarui di halaman merchant saat penawaran dibuka.</small>
           </div>
 
