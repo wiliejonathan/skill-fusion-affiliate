@@ -69,6 +69,30 @@ function inferBrand(title:string,id:string){
   return (title.split(/\s+/)[0]||"TECH").toUpperCase();
 }
 
+function formatAdminPrice(price:string|null|undefined,currency:string|null|undefined){
+  const raw=String(price||"").trim();
+  if(!raw) return null;
+  const numeric=Number(raw.replace(/[^0-9]/g,""));
+  if(!Number.isFinite(numeric)||numeric<=0) return null;
+  if(String(currency||"IDR").toUpperCase()==="IDR"){
+    return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(numeric);
+  }
+  return `${currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
+}
+
+function formatAdminPriceAge(value:string|null|undefined){
+  if(!value) return "Belum pernah diperbarui";
+  const time=Date.parse(value);
+  if(!Number.isFinite(time)) return "Waktu update tidak diketahui";
+  const diff=Math.max(0,Date.now()-time);
+  const minutes=Math.floor(diff/60000);
+  if(minutes<1) return "Baru saja diperbarui";
+  if(minutes<60) return `Diperbarui ${minutes} menit lalu`;
+  const hours=Math.floor(minutes/60);
+  if(hours<24) return `Diperbarui ${hours} jam lalu`;
+  return `Diperbarui ${Math.floor(hours/24)} hari lalu`;
+}
+
 function inferFeatures(title:string){
   const value=title.toLowerCase();
   const features:string[]=[];
@@ -552,6 +576,36 @@ export default function AdminPage(){
     window.localStorage.setItem(STORAGE_RESOLVED_KEY,JSON.stringify(resolved));
     window.localStorage.setItem(STORAGE_DIRTY_KEY,JSON.stringify(dirtyUrls));
   },[catalog,resolved,dirtyUrls,hydrated]);
+
+  useEffect(()=>{
+    if(!authenticated) return;
+
+    let stopped=false;
+    let pending=false;
+
+    async function syncVisitorPrices(){
+      if(stopped||pending||document.visibilityState==="hidden") return;
+      if(busy||refreshingUrl||reloadingUrl||bulkAction||dirtyUrls.length) return;
+      pending=true;
+      try{
+        await pullDatabase();
+      }catch{
+        // Visitors can update prices independently; keep current Admin view if polling fails.
+      }finally{
+        pending=false;
+      }
+    }
+
+    const timer=window.setInterval(syncVisitorPrices,15000);
+    const onVisible=()=>{if(document.visibilityState==="visible") void syncVisitorPrices()};
+    document.addEventListener("visibilitychange",onVisible);
+
+    return ()=>{
+      stopped=true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange",onVisible);
+    };
+  },[authenticated,busy,refreshingUrl,reloadingUrl,bulkAction,dirtyUrls.length]);
 
   function switchImportMode(mode:ImportMode){
     setImportMode(mode);
@@ -1229,7 +1283,11 @@ export default function AdminPage(){
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
                 </div>:null}
                 {meta?.images?.length?<small>{meta.images.length} foto produk berhasil ditemukan</small>:<small>Foto belum terbaca — gunakan Reload DOM</small>}
-                {meta?.price?<b>{meta.currency==="IDR"?"Rp ":""}{meta.price}</b>:<b>Harga mengikuti Blibli</b>}
+                <div className="admin-price-box">
+                  <span>LIVE PRICE</span>
+                  <b>{formatAdminPrice(meta?.price,meta?.currency)||"Belum ada harga tersimpan"}</b>
+                  <small>{formatAdminPriceAge(meta?.priceUpdatedAt)}</small>
+                </div>
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
                   <button
