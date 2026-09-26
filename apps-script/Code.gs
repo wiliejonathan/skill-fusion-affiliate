@@ -155,6 +155,11 @@ function savePublish_(request){
       throw e;
     }
 
+    // A sparse resolver/reload must never erase an already healthy gallery.
+    if(current&&(!p.images||!p.images.length)&&current.images&&current.images.length){
+      p.images=current.images.slice();
+    }
+
     p.sequence=current?current.sequence:++sequence;
   });
   all.forEach(p=>{upsert_(DRAFT_SHEET,p);upsert_(PUBLISHED_SHEET,p)});
