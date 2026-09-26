@@ -107,6 +107,26 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
   return products;
 }
 
+function sanitizeProductImages(images:string[]){
+  const seen=new Set<string>();
+  const out:string[]=[];
+  for(const raw of images||[]){
+    const url=String(raw||"").trim();
+    if(!/^https:\/\//i.test(url)) continue;
+    const lower=url.toLowerCase();
+    if(/\.(?:css|ico|svg)(?:[?#]|$)/i.test(lower)) continue;
+    if(/(?:favicon|logo|icon|sprite|avatar|badge|tracking|pixel|placeholder)/i.test(lower)) continue;
+    if(!/\.(?:jpe?g|png|webp|avif)(?:[?#]|$)/i.test(lower)) continue;
+
+    // Treat transformed variants such as ?f=webp as the same source image.
+    const key=lower.split("?")[0].replace(/\/+/g,"/");
+    if(seen.has(key)) continue;
+    seen.add(key);
+    out.push(url);
+  }
+  return out;
+}
+
 function dbToLocal(products:DbProduct[]){
   const catalog:CatalogIdentity[]=products.map(p=>({
     sequence:p.sequence,
@@ -387,13 +407,15 @@ export default function AdminPage(){
     const item=baseCatalog.find(x=>x.affiliateUrl===url);
     const previous=baseResolved[url];
 
-    const previousImages=previous?.images?.length
-      ? previous.images
-      : (previous?.image?[previous.image]:[]);
-    const domImages=data.images?.length
-      ? data.images
-      : (data.image?[data.image]:[]);
-    const nextImages=domImages.length>=previousImages.length?domImages:previousImages;
+    const previousImages=sanitizeProductImages(
+      previous?.images?.length ? previous.images : (previous?.image?[previous.image]:[])
+    );
+    const domImages=sanitizeProductImages(
+      data.images?.length ? data.images : (data.image?[data.image]:[])
+    );
+    // Reload DOM is authoritative when it returns usable product media.
+    // Do not keep an old 2-photo gallery just because Published is stale.
+    const nextImages=domImages.length?domImages:previousImages;
 
     const merged:ResolvedProduct={
       ...previous,
@@ -474,11 +496,14 @@ export default function AdminPage(){
       const next=mergeReloadedProduct(url,data,catalog,resolved);
       setCatalog(next.catalog);
       setResolved(next.resolved);
-      setDirtyUrls(prev=>prev.includes(url)?prev:[...prev,url]);
+
+      // Immediately publish the sanitized gallery so Client and Admin cannot drift.
+      await pushSingleProduct(url,next.catalog,next.resolved);
+      setDirtyUrls(prev=>prev.filter(item=>item!==url));
 
       setProductNotice(prev=>({
         ...prev,
-        [url]:`✓ Reload DOM selesai · ${data.images?.length||0} foto dibaca dari DOM · ${next.merged.images?.length||0} foto tersimpan di Admin · tekan Refresh Data untuk kirim ke Client`
+        [url]:`✓ Reload DOM selesai · ${data.images?.length||0} sumber terbaca · ${next.merged.images?.length||0} foto produk valid · langsung tersinkron ke Client`
       }));
     }catch(error){
       setProductNotice(prev=>({
@@ -561,11 +586,17 @@ export default function AdminPage(){
 
       setCatalog(nextCatalog);
       setResolved(nextResolved);
-      setDirtyUrls(prev=>[...new Set([...prev,...reloadedUrls])]);
+
+      if(success){
+        const synced=await pushDatabase(nextCatalog,nextResolved);
+        if(!synced) throw new Error("Sinkron Client setelah Reload All gagal");
+      }
+      setDirtyUrls([]);
+
       setNotice(
         failed
-          ? `Reload All selesai · ${success} berhasil, ${failed} gagal. Data masih di Admin; gunakan Refresh Data All untuk kirim ke Client.`
-          : `✓ Reload All selesai · ${success} produk dibaca ulang dari DOM Blibli. Gunakan Refresh Data All untuk kirim ke Client.`
+          ? `Reload All selesai · ${success} berhasil dan langsung tersinkron ke Client, ${failed} gagal.`
+          : `✓ Reload All selesai · ${success} produk dibaca ulang, dibersihkan, dan langsung tersinkron ke Client.`
       );
     }finally{
       setBulkAction(null);
