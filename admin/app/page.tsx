@@ -251,7 +251,16 @@ type ImportJobState={
   imported:number;
   duplicates:number;
   failed:number;
+  retries?:number;
   currentUrl?:string;
+  checkpoint?:{
+    index:number;
+    url:string;
+    phase:string;
+    attempts:number;
+    source:string;
+    productId?:string;
+  }|null;
   messages?:string[];
   createdAt?:string;
   updatedAt?:string;
@@ -712,9 +721,13 @@ export default function AdminPage(){
 
         if(job&&(job.status==="queued"||job.status==="running")){
           setBusy(true);
+          const checkpointText=job.checkpoint
+            ? ` · checkpoint #${job.checkpoint.index+1} ${job.checkpoint.phase} · attempt ${job.checkpoint.attempts}`
+            : "";
           setNotice(
             `Background import ${job.done}/${job.total} · ${job.imported} berhasil · `+
-            `${job.duplicates} duplicate · ${job.failed} gagal`+
+            `${job.duplicates} duplicate · ${job.failed} gagal · ${job.retries||0} retry`+
+            checkpointText+
             (job.currentUrl?` · ${job.currentUrl}`:"")
           );
 
@@ -1395,8 +1408,12 @@ export default function AdminPage(){
             <span>{importJob.done}/{importJob.total}</span>
           </div>
           <div className="import-job-track"><i style={{width:`${importJob.total?Math.min(100,Math.round(importJob.done/importJob.total*100)):0}%`}}/></div>
-          <small>{importJob.imported} berhasil · {importJob.duplicates} duplicate · {importJob.failed} gagal</small>
-          <small>Proses tersimpan di Apps Script dan tetap berjalan walaupun tab ini ditutup.</small>
+          <small>{importJob.imported} berhasil · {importJob.duplicates} duplicate · {importJob.failed} gagal · {importJob.retries||0} retry</small>
+          {importJob.checkpoint&&<small>
+            Checkpoint #{importJob.checkpoint.index+1} · {importJob.checkpoint.phase} · attempt {importJob.checkpoint.attempts}
+            {importJob.checkpoint.source==="background"?" · diulang oleh backend":""}
+          </small>}
+          <small>Jika proses terputus atau berpindah ke background, link pada checkpoint diulang sebelum lanjut ke link berikutnya.</small>
         </div>}
         {notice&&<div className="notice">{notice}</div>}
       </section>
