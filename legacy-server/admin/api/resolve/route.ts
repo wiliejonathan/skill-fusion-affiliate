@@ -188,13 +188,177 @@ function imageFromSummaryItem(item:any){
     ||null;
 }
 
+type ProductVariant={name:string;values:string[]};
+
+function normalizePriceValue(value:unknown){
+  if(typeof value==="number"&&Number.isFinite(value)&&value>0) return String(Math.round(value));
+  const raw=String(value??"").trim().replace(/^Rp\s*/i,"").replace(/\s+/g,"");
+  if(!raw) return null;
+  if(/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(raw)){
+    const n=Number(raw.replace(/\./g,"").replace(",","."));
+    return Number.isFinite(n)&&n>0?String(Math.round(n)):null;
+  }
+  if(/^\d+(?:\.\d+)?$/.test(raw)){
+    const n=Number(raw);
+    return Number.isFinite(n)&&n>0?String(Math.round(n)):null;
+  }
+  const digits=raw.replace(/[^0-9]/g,"");
+  if(!digits) return null;
+  const n=Number(digits);
+  return Number.isFinite(n)&&n>0?String(Math.round(n)):null;
+}
+
+function cleanProductText(value:unknown){
+  return String(value??"")
+    .replace(/<script[\s\S]*?<\/script>/gi," ")
+    .replace(/<style[\s\S]*?<\/style>/gi," ")
+    .replace(/<br\s*\/?>/gi,"\n")
+    .replace(/<\/p>|<\/li>|<\/div>/gi,"\n")
+    .replace(/<[^>]+>/g," ")
+    .replace(/&nbsp;/gi," ")
+    .replace(/&amp;/gi,"&")
+    .replace(/&quot;/gi,'"')
+    .replace(/&#39;|&apos;/gi,"'")
+    .replace(/\r/g,"")
+    .replace(/[ \t]+/g," ")
+    .replace(/\n[ \t]+/g,"\n")
+    .replace(/\n{3,}/g,"\n\n")
+    .trim()
+    .slice(0,5000);
+}
+
+function extractSummaryPriceData(value:any){
+  const priorities:Record<string,number>={
+    listed:200,listedprice:198,finalprice:190,saleprice:185,sellingprice:182,
+    offerprice:180,discountedprice:178,currentprice:176,itemprice:174,
+    lowprice:160,price:150,minprice:130,originalprice:20,strikeprice:10
+  };
+  const found:Array<{price:string;score:number}>=[];
+  let currency:string|null=null;
+
+  function visit(node:any,keyHint=""){
+    if(node===null||node===undefined) return;
+    if(typeof node==="string"||typeof node==="number"){
+      const key=keyHint.toLowerCase().replace(/[^a-z]/g,"");
+      if(key.includes("currency")){
+        const cur=String(node).trim().toUpperCase();
+        if(/^[A-Z]{3}$/.test(cur)) currency=cur;
+      }
+      if(Object.prototype.hasOwnProperty.call(priorities,key)){
+        const price=normalizePriceValue(node);
+        if(price) found.push({price,score:priorities[key]});
+      }
+      return;
+    }
+    if(Array.isArray(node)){node.forEach(item=>visit(item,keyHint));return}
+    if(typeof node==="object"){
+      Object.entries(node).forEach(([key,child])=>visit(child,key));
+    }
+  }
+
+  visit(value);
+  if(!found.length) return {price:null,currency};
+  found.sort((a,b)=>b.score-a.score||Number(a.price)-Number(b.price));
+  return {price:found[0].price,currency:currency||"IDR"};
+}
+
+function extractSummaryDescription(value:any){
+  const priorities:Record<string,number>={
+    uniquesellingpoint:200,productstory:195,productdescription:190,
+    description:180,shortdescription:175,longdescription:175,
+    productdetail:165,productdetails:165,overview:150
+  };
+  const found:Array<{text:string;score:number}>=[];
+
+  function visit(node:any,keyHint=""){
+    if(node===null||node===undefined) return;
+    if(typeof node==="string"){
+      const key=keyHint.toLowerCase().replace(/[^a-z]/g,"");
+      const score=priorities[key]||0;
+      if(score){
+        const text=cleanProductText(node);
+        if(text.length>=20) found.push({text,score});
+      }
+      return;
+    }
+    if(Array.isArray(node)){node.forEach(item=>visit(item,keyHint));return}
+    if(typeof node==="object"){
+      Object.entries(node).forEach(([key,child])=>visit(child,key));
+    }
+  }
+
+  visit(value);
+  found.sort((a,b)=>b.score-a.score||b.text.length-a.text.length);
+  return found[0]?.text||null;
+}
+
+function extractSummaryVariants(value:any):ProductVariant[]{
+  const groups=new Map<string,{name:string;values:string[]}>();
+
+  function add(name:unknown,raw:unknown){
+    const label=String(name||"Varian").replace(/\s+/g," ").trim();
+    const val=String(raw??"").replace(/\s+/g," ").trim();
+    if(!label||!val||val.length>100) return;
+    if(/^(pilih|select|varian|variant|warna|color)$/i.test(val)) return;
+    const key=label.toLowerCase();
+    if(!groups.has(key)) groups.set(key,{name:label,values:[]});
+    const group=groups.get(key)!;
+    if(!group.values.includes(val)) group.values.push(val);
+  }
+
+  function consumeAttribute(attr:any){
+    if(!attr||typeof attr!=="object") return;
+    const name=attr.name||attr.label||attr.attributeName||attr.variantName||"Varian";
+    if(attr.value!==undefined&&attr.value!==null&&typeof attr.value!=="object") add(name,attr.value);
+    const values=attr.values||attr.variantValues||attr.items;
+    if(Array.isArray(values)){
+      values.forEach((item:any)=>{
+        if(typeof item==="string"||typeof item==="number") add(name,item);
+        else if(item&&typeof item==="object") add(name,item.value||item.name||item.label||item.text||item.displayName||"");
+      });
+    }
+  }
+
+  function visit(node:any,keyHint=""){
+    if(!node) return;
+    if(Array.isArray(node)){
+      if(/attributes?/i.test(keyHint)) node.forEach(consumeAttribute);
+      node.forEach(item=>visit(item,keyHint));
+      return;
+    }
+    if(typeof node!=="object") return;
+
+    if((node.name||node.attributeName)&&(node.value!==undefined||Array.isArray(node.values))){
+      consumeAttribute(node);
+    }
+    if(Array.isArray(node.attributes)) node.attributes.forEach(consumeAttribute);
+
+    Object.entries(node).forEach(([key,child]:[string,any])=>{
+      if(/^(color|colour|warna|size|ukuran|capacity|kapasitas|storage|memory|ram)$/i.test(key)){
+        if(Array.isArray(child)){
+          child.forEach((item:any)=>{
+            if(typeof item==="string"||typeof item==="number") add(key,item);
+            else if(item&&typeof item==="object") add(key,item.value||item.name||item.label||"");
+          });
+        }else if(typeof child==="string"||typeof child==="number"){
+          add(key,child);
+        }
+      }
+      if(child&&typeof child==="object") visit(child,key);
+    });
+  }
+
+  visit(value);
+  return [...groups.values()].filter(group=>group.values.length).slice(0,12);
+}
+
 function productSkuFromItemSku(productId:string|null){
   if(!productId) return null;
   return productId.replace(/-\d{5}$/,"")||null;
 }
 
-async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null):Promise<{title:string|null;images:string[]}>{
-  if(!productId) return {title:null,images:[]};
+async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null):Promise<{title:string|null;images:string[];price:string|null;currency:string|null;description:string|null;variants:ProductVariant[]}>{
+  if(!productId) return {title:null,images:[],price:null,currency:null,description:null,variants:[]};
 
   try{
     const source=new URL(sourceUrl);
@@ -233,6 +397,10 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
     ];
 
     let bestTitle:string|null=null;
+    let bestPrice:string|null=null;
+    let bestCurrency:string|null=null;
+    let bestDescription:string|null=null;
+    let bestVariants:ProductVariant[]=[];
     const collected:string[]=[];
 
     for(const endpoint of endpoints){
@@ -256,6 +424,20 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
           const data=payload?.data||payload;
           if(typeof data?.name==="string"&&data.name.trim()) bestTitle=data.name.trim();
 
+          const priceData=extractSummaryPriceData(data);
+          if(priceData.price){
+            bestPrice=priceData.price;
+            bestCurrency=priceData.currency||bestCurrency||"IDR";
+          }
+
+          const description=extractSummaryDescription(data);
+          if(description&&(!bestDescription||description.length>bestDescription.length)){
+            bestDescription=description;
+          }
+
+          const variants=extractSummaryVariants(data);
+          if(variants.length>bestVariants.length) bestVariants=variants;
+
           const productCode=typeof data?.productCode==="string"?data.productCode:null;
           const assetCode=productCode&&/^MTA-\d+$/i.test(productCode)?productCode:null;
 
@@ -276,16 +458,16 @@ async function fetchBlibliSummaryGallery(sourceUrl:string,productId:string|null)
           // the same MTA asset. Return early once we already have a healthy set.
           const coherent=chooseDominantGallery(collected);
           if(coherent.length>=8){
-            return {title:bestTitle,images:coherent.slice(0,30)};
+            return {title:bestTitle,images:coherent.slice(0,30),price:bestPrice,currency:bestCurrency,description:bestDescription,variants:bestVariants};
           }
         }catch{}
       }
     }
 
     const coherent=chooseDominantGallery(collected);
-    return {title:bestTitle,images:(coherent.length?coherent:collected).slice(0,30)};
+    return {title:bestTitle,images:(coherent.length?coherent:collected).slice(0,30),price:bestPrice,currency:bestCurrency,description:bestDescription,variants:bestVariants};
   }catch{
-    return {title:null,images:[]};
+    return {title:null,images:[],price:null,currency:null,description:null,variants:[]};
   }
 }
 
@@ -463,6 +645,24 @@ export async function GET(req:NextRequest){
       const ogImage=pick(html,[
         /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
       ]);
+
+      let price=normalizePriceValue(pick(html,[
+        /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
+        /"(?:listed|listedPrice|finalPrice|salePrice|sellingPrice|offerPrice|currentPrice|price)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
+        /Rp\s*([0-9]{1,3}(?:\.[0-9]{3})+|[0-9]{4,})/i
+      ]));
+      let currency=pick(html,[
+        /<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,
+        /"priceCurrency"\s*:\s*"([^"]+)"/i
+      ])||null;
+      let description=cleanProductText(pick(html,[
+        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+        /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
+        /"uniqueSellingPoint"\s*:\s*"((?:\\.|[^"\\]){20,5000})"/i,
+        /"productDescription"\s*:\s*"((?:\\.|[^"\\]){20,5000})"/i
+      ]))||null;
+      let variants:ProductVariant[]=[];
+
       const extractedImages=extractStaticImages(html);
       const allImages=[...new Set([ogImage,...extractedImages].filter((x):x is string=>Boolean(x)))];
       const assetKey=(ogImage||allImages[0]||"").match(/MTA-\d+/)?.[0]||null;
@@ -472,9 +672,11 @@ export async function GET(req:NextRequest){
       // selected SKU gallery even when the HTML response itself is sparse.
       const summary=await fetchBlibliSummaryGallery(current,productId);
       if(summary.title) title=summary.title;
-      if(summary.images.length>images.length){
-        images=summary.images;
-      }
+      if(summary.images.length>images.length) images=summary.images;
+      if(summary.price) price=summary.price;
+      if(summary.currency) currency=summary.currency;
+      if(summary.description) description=summary.description;
+      if(summary.variants.length) variants=summary.variants;
 
       // Then try a fresh SEO/product-page pass as another source of gallery media.
       const seoGallery=await fetchBlibliProductSeoGallery(canonical,productId,title);
@@ -504,33 +706,30 @@ export async function GET(req:NextRequest){
       }
 
       const image=images[0]||null;
-      const price=pick(html,[
-        /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
-        /"price"\s*:\s*"?(\d+(?:\.\d+)?)"?/i
-      ]);
-      const currency=pick(html,[
-        /<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,
-        /"priceCurrency"\s*:\s*"([^"]+)"/i
-      ]);
 
       return NextResponse.json({
         ok:true,inputUrl:raw,finalUrl:current,canonicalUrl:canonical,
         canonicalProductId:productId,
-        title,image,images,price,currency
-      });
+        title,image,images,
+        price:price||null,
+        currency:currency||(price?"IDR":null),
+        description:description||null,
+        variants
+      },{headers:{"cache-control":"no-store, max-age=0","access-control-allow-origin":"*"}});
+      
     }
 
     const canonical=canonicalProductUrl(current);
     return NextResponse.json({
       ok:true,inputUrl:raw,finalUrl:current,canonicalUrl:canonical,
       canonicalProductId:productIdFromUrl(current),title:titleFromUrl(current),
-      image:null,images:[],price:null,currency:null
-    });
+      image:null,images:[],price:null,currency:null,description:null,variants:[]
+    },{headers:{"cache-control":"no-store, max-age=0","access-control-allow-origin":"*"}});
   }catch{
     return NextResponse.json({
       ok:false,inputUrl:raw,finalUrl:current,canonicalUrl:null,canonicalProductId:null,
-      title:"Produk Blibli",image:null,images:[],price:null,currency:null,
+      title:"Produk Blibli",image:null,images:[],price:null,currency:null,description:null,variants:[],
       message:"Link affiliate valid, tetapi metadata belum bisa dibaca otomatis."
-    });
+    },{headers:{"cache-control":"no-store, max-age=0","access-control-allow-origin":"*"}});
   }
 }
