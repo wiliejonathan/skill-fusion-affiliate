@@ -49,3 +49,54 @@ test('valid imported identity stays published even when gallery is unavailable',
  assert.equal(published[0].id,'NEW-12345-00001');
  assert.deepEqual(Array.from(published[0].images),[]);
 });
+
+
+test('background retry resumes the same checkpoint and does not miscount a recovered save as duplicate',()=>{
+ const {ctx,post}=setup();
+ const savedProduct={...product,id:'CHK-12345-00001',canonicalProductId:'CHK-12345-00001',affiliateUrl:'https://s.blibli.com/checkpoint-product',canonicalUrl:'https://www.blibli.com/p/checkpoint-product/is--CHK-12345-00001'};
+ assert.equal(post({action:'savePublish',product:savedProduct}).ok,true);
+
+ const store={};
+ ctx.PropertiesService={
+  getScriptProperties:()=>({
+   getProperty:key=>store[key]||null,
+   setProperty:(key,value)=>{store[key]=String(value)}
+  })
+ };
+
+ const job={
+  id:'IMP-checkpoint',
+  status:'running',
+  links:[savedProduct.affiliateUrl],
+  cursor:0,
+  total:1,
+  done:0,
+  imported:0,
+  duplicates:0,
+  failed:0,
+  retries:0,
+  currentUrl:savedProduct.affiliateUrl,
+  checkpoint:{
+   index:0,
+   url:savedProduct.affiliateUrl,
+   phase:'saving',
+   attempts:1,
+   source:'foreground',
+   productId:savedProduct.id
+  },
+  messages:[],
+  createdAt:new Date().toISOString(),
+  updatedAt:new Date().toISOString()
+ };
+ store.SKILL_FUSION_IMPORT_JOB_V1=JSON.stringify(job);
+
+ const result=ctx.processImportQueueBatch_(1,60000,false,'background');
+ assert.equal(result.ok,true);
+ assert.equal(result.job.status,'completed');
+ assert.equal(result.job.done,1);
+ assert.equal(result.job.imported,1);
+ assert.equal(result.job.duplicates,0);
+ assert.equal(result.job.failed,0);
+ assert.equal(result.job.retries,1);
+ assert.equal(result.job.checkpoint,null);
+});

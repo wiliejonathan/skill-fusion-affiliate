@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:18,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:19,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -116,7 +116,16 @@ function importJobView_(job){
       imported:Number(job.imported||0),
       duplicates:Number(job.duplicates||0),
       failed:Number(job.failed||0),
+      retries:Number(job.retries||0),
       currentUrl:job.currentUrl||'',
+      checkpoint:job.checkpoint?{
+        index:Number(job.checkpoint.index||0),
+        url:String(job.checkpoint.url||''),
+        phase:String(job.checkpoint.phase||'processing'),
+        attempts:Number(job.checkpoint.attempts||1),
+        source:String(job.checkpoint.source||''),
+        productId:String(job.checkpoint.productId||'')
+      }:null,
       messages:Array.isArray(job.messages)?job.messages.slice(-20):[],
       createdAt:job.createdAt||'',
       updatedAt:job.updatedAt||''
@@ -170,7 +179,9 @@ function startImportJob_(links){
     imported:0,
     duplicates:0,
     failed:0,
+    retries:0,
     currentUrl:'',
+    checkpoint:null,
     messages:[],
     createdAt:now,
     updatedAt:now
@@ -218,12 +229,17 @@ function importProductFromResolved_(resolved,url){
   };
 }
 
-function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining){
+function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining,source){
   let lock=null;
   try{
     if(typeof LockService!=='undefined'){
       lock=LockService.getScriptLock();
       if(!lock.tryLock(1200)){
+        // A background trigger can collide with an active foreground kick.
+        // Reschedule it instead of losing the fallback worker.
+        if(scheduleRemaining){
+          try{scheduleImportTrigger_()}catch(ignore){}
+        }
         return importJobView_(readImportJob_());
       }
     }
@@ -234,6 +250,7 @@ function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining){
     }
 
     job.status='running';
+    if(!Number.isFinite(Number(job.retries)))job.retries=0;
     writeImportJob_(job);
 
     const started=Date.now();
@@ -245,44 +262,128 @@ function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining){
       processed<Math.max(1,Number(maxItems)||1) &&
       (Date.now()-started)<Math.max(15000,Number(maxMs)||60000)
     ){
-      const url=String(job.links[job.cursor]||'');
+      const index=Number(job.cursor||0);
+      const url=String(job.links[index]||'');
+      const previousCheckpoint=job.checkpoint &&
+        Number(job.checkpoint.index)===index &&
+        String(job.checkpoint.url||'')===url
+          ? job.checkpoint
+          : null;
+
+      const retrying=!!previousCheckpoint;
+      const attempts=retrying?Number(previousCheckpoint.attempts||1)+1:1;
+
+      if(retrying){
+        job.retries=Number(job.retries||0)+1;
+        job.messages.push(
+          'Checkpoint diulang'+(source==='background'?' di background':'')+
+          ': #'+(index+1)+' attempt '+attempts
+        );
+        log_(
+          'IMPORT_CHECKPOINT',
+          job.id,
+          'RETRY',
+          '#'+(index+1)+' · attempt '+attempts+' · '+String(source||'worker')
+        );
+      }
+
       job.currentUrl=url;
+      job.checkpoint={
+        index:index,
+        url:url,
+        phase:'processing',
+        attempts:attempts,
+        source:String(source||'worker'),
+        productId:String(previousCheckpoint&&previousCheckpoint.productId||''),
+        startedAt:new Date().toISOString()
+      };
+      if(job.messages.length>30)job.messages=job.messages.slice(-30);
       writeImportJob_(job);
+
+      let outcome='';
+      let outcomeMessage='';
+      let outcomeProductId='';
 
       try{
         const sameUrl=existing.find(function(p){return p.affiliateUrl===url});
+
         if(sameUrl){
-          job.duplicates++;
-          job.messages.push('Duplicate dilewati: '+url);
+          const recoveredFromCheckpoint=retrying && (
+            !previousCheckpoint.productId ||
+            String(previousCheckpoint.productId||'').toUpperCase()===String(sameUrl.id||'').toUpperCase()
+          );
+
+          if(recoveredFromCheckpoint){
+            outcome='imported';
+            outcomeProductId=String(sameUrl.id||'');
+            outcomeMessage='Checkpoint recovered: '+outcomeProductId+' sudah tersimpan';
+          }else{
+            outcome='duplicate';
+            outcomeProductId=String(sameUrl.id||'');
+            outcomeMessage='Duplicate dilewati: '+url;
+          }
         }else{
+          job.checkpoint.phase='resolving';
+          writeImportJob_(job);
+
           const resolved=resolveProduct_(url);
           const id=String(resolved.canonicalProductId||'').toUpperCase();
           const canonical=String(resolved.canonicalUrl||'').replace(/\/$/,'').toLowerCase();
+          job.checkpoint.phase='resolved';
+          job.checkpoint.productId=id;
+          writeImportJob_(job);
+
           const duplicate=existing.find(function(p){
             return String(p.id||'').toUpperCase()===id ||
               (!!canonical&&String(p.canonicalUrl||'').replace(/\/$/,'').toLowerCase()===canonical);
           });
 
           if(duplicate){
-            job.duplicates++;
-            job.messages.push('Duplicate Product ID dilewati: '+id);
+            const recoveredFromCheckpoint=retrying &&
+              String(previousCheckpoint.productId||'').toUpperCase()===id &&
+              String(duplicate.affiliateUrl||'')===url;
+
+            if(recoveredFromCheckpoint){
+              outcome='imported';
+              outcomeProductId=id;
+              outcomeMessage='Checkpoint recovered: '+id+' sudah tersimpan';
+            }else{
+              outcome='duplicate';
+              outcomeProductId=id;
+              outcomeMessage='Duplicate Product ID dilewati: '+id;
+            }
           }else{
             const product=importProductFromResolved_(resolved,url);
+            job.checkpoint.phase='saving';
+            job.checkpoint.productId=product.id;
+            writeImportJob_(job);
+
             savePublish_({product:product});
+
             const saved=readProducts_(DRAFT_SHEET).find(function(p){return p.id===product.id});
             existing.push(saved||product);
-            job.imported++;
-            job.messages.push('Berhasil: '+product.id+' · '+product.images.length+' image');
+            outcome='imported';
+            outcomeProductId=product.id;
+            outcomeMessage='Berhasil: '+product.id+' · '+product.images.length+' image';
           }
         }
       }catch(e){
-        job.failed++;
-        job.messages.push('Gagal: '+url+' · '+String(e&&e.message||e).slice(0,220));
+        outcome='failed';
+        outcomeMessage='Gagal: '+url+' · '+String(e&&e.message||e).slice(0,220);
       }
 
-      job.cursor++;
+      // Only now is this checkpoint committed as complete. If Apps Script is
+      // interrupted before this block, cursor remains unchanged and the next
+      // foreground/background worker must repeat the same link.
+      if(outcome==='imported')job.imported++;
+      else if(outcome==='duplicate')job.duplicates++;
+      else job.failed++;
+
+      job.messages.push(outcomeMessage);
+      job.cursor=index+1;
       job.done=job.cursor;
       job.currentUrl='';
+      job.checkpoint=null;
       if(job.messages.length>30)job.messages=job.messages.slice(-30);
       writeImportJob_(job);
       processed++;
@@ -291,38 +392,48 @@ function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining){
     if(job.cursor>=job.links.length){
       job.status='completed';
       job.currentUrl='';
+      job.checkpoint=null;
       writeImportJob_(job);
       clearImportTriggers_();
-      log_('IMPORT_JOB',job.id,'DONE',job.imported+' imported · '+job.duplicates+' duplicate · '+job.failed+' failed');
+      log_(
+        'IMPORT_JOB',
+        job.id,
+        'DONE',
+        job.imported+' imported · '+job.duplicates+' duplicate · '+job.failed+
+        ' failed · '+Number(job.retries||0)+' retry'
+      );
     }else{
       writeImportJob_(job);
-      if(scheduleRemaining) scheduleImportTrigger_();
+      if(scheduleRemaining)scheduleImportTrigger_();
     }
 
     return importJobView_(job);
   }catch(e){
+    // Do NOT clear checkpoint/cursor here. An interrupted worker must resume
+    // from the exact same link on the next kick/trigger.
     const job=readImportJob_();
     if(job){
-      job.status='error';
-      job.currentUrl='';
+      job.status='running';
       job.messages=Array.isArray(job.messages)?job.messages:[];
-      job.messages.push('Worker error: '+String(e&&e.message||e).slice(0,240));
+      job.messages.push('Worker dihentikan; checkpoint akan diulang: '+String(e&&e.message||e).slice(0,180));
+      if(job.messages.length>30)job.messages=job.messages.slice(-30);
       writeImportJob_(job);
-      log_('IMPORT_JOB',job.id,'ERROR',String(e&&e.message||e).slice(0,240));
+      log_('IMPORT_CHECKPOINT',job.id,'PAUSED',String(e&&e.message||e).slice(0,220));
+      try{if(scheduleRemaining)scheduleImportTrigger_()}catch(ignore){}
     }
-    try{clearImportTriggers_()}catch(ignore){}
     return importJobView_(job);
   }finally{
     if(lock&&lock.hasLock())lock.releaseLock();
   }
 }
+
 function kickImportJob_(){
   // Process up to two products immediately while the Admin tab is open.
   // The scheduled trigger remains a fallback if the tab/browser is closed.
-  return processImportQueueBatch_(2,75000,true);
+  return processImportQueueBatch_(2,75000,true,'foreground');
 }
 function processImportQueueTrigger(){
-  processImportQueueBatch_(6,240000,true);
+  processImportQueueBatch_(6,240000,true,'background');
 }
 
 function validBlibliUrl_(url){
