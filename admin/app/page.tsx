@@ -2,7 +2,7 @@
 
 import {backendFetch as fetch,clearAdminKey,getStoredAdminKey,verifyAdminKey} from "@/lib/backend";
 import {useEffect,useMemo,useState} from "react";
-import {CheckCircle2,ClipboardPaste,CopyCheck,ExternalLink,LayoutDashboard,Link2,List,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
+import {CheckCircle2,ClipboardPaste,CopyCheck,ExternalLink,Eye,EyeOff,LayoutDashboard,Link2,List,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
 import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
@@ -243,6 +243,19 @@ function validBlibliSource(...candidates:(string|null|undefined)[]){
 }
 
 type ImportMode="single"|"multiple";
+type ImportJobState={
+  id:string;
+  status:"queued"|"running"|"completed"|"error";
+  total:number;
+  done:number;
+  imported:number;
+  duplicates:number;
+  failed:number;
+  currentUrl?:string;
+  messages?:string[];
+  createdAt?:string;
+  updatedAt?:string;
+};
 
 function extractHttpLinks(raw:string){
   const marked=String(raw||"").replace(/(?=https?:\/\/)/gi,"\n");
@@ -498,6 +511,7 @@ export default function AdminPage(){
   const [authReady,setAuthReady]=useState(false);
   const [authenticated,setAuthenticated]=useState(false);
   const [loginPassword,setLoginPassword]=useState("");
+  const [showPassword,setShowPassword]=useState(false);
   const [rememberLogin,setRememberLogin]=useState(true);
   const [loginBusy,setLoginBusy]=useState(false);
   const [loginError,setLoginError]=useState("");
@@ -513,6 +527,7 @@ export default function AdminPage(){
   const [dirtyUrls,setDirtyUrls]=useState<string[]>([]);
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
   const [duplicatePopup,setDuplicatePopup]=useState<{title:string;items:string[]}|null>(null);
+  const [importJob,setImportJob]=useState<ImportJobState|null>(null);
 
   async function applyServerProducts(products:DbProduct[]){
     const server=dbToLocal(products);
@@ -530,6 +545,8 @@ export default function AdminPage(){
     setLoginBusy(true);
     setLoginError("");
     try{
+      const health=await fetch("/api/health-check",{cache:"no-store"} as RequestInit).then(res=>res.json());
+      if(!health?.ok) throw new Error(health?.message||"Apps Script tidak dapat dijangkau.");
       const data=await verifyAdminKey(password,remember);
       if(!data?.ok||!Array.isArray(data.products)) throw new Error(data?.message||"Password Admin salah.");
       await applyServerProducts(data.products as DbProduct[]);
@@ -675,6 +692,67 @@ export default function AdminPage(){
     };
   },[authenticated,busy,refreshingUrl,reloadingUrl,bulkAction,dirtyUrls.length]);
 
+  useEffect(()=>{
+    if(!authenticated) return;
+
+    let stopped=false;
+    let pending=false;
+    let finishedId="";
+
+    async function pollImportJob(){
+      if(stopped||pending) return;
+      pending=true;
+      try{
+        const res=await fetch("/api/import-job",{cache:"no-store"});
+        const data=await res.json();
+        const job=(data?.job||null) as ImportJobState|null;
+        if(stopped) return;
+
+        setImportJob(job);
+
+        if(job&&(job.status==="queued"||job.status==="running")){
+          setBusy(true);
+          setNotice(
+            `Background import ${job.done}/${job.total} · ${job.imported} berhasil · `+
+            `${job.duplicates} duplicate · ${job.failed} gagal`+
+            (job.currentUrl?` · ${job.currentUrl}`:"")
+          );
+          return;
+        }
+
+        if(job&&(job.status==="completed"||job.status==="error")){
+          setBusy(false);
+          if(finishedId!==job.id){
+            finishedId=job.id;
+            await pullDatabase();
+            setNotice(
+              job.status==="completed"
+                ? `✓ Import selesai · ${job.imported} produk masuk Client · ${job.duplicates} duplicate dilewati · ${job.failed} gagal.`
+                : `Import background berhenti dengan error · ${job.imported} berhasil · ${job.failed} gagal.`
+            );
+          }
+        }else{
+          setBusy(false);
+        }
+      }catch{
+        // Keep the current screen; the server-side job continues independently.
+      }finally{
+        pending=false;
+      }
+    }
+
+    void pollImportJob();
+    const timer=window.setInterval(pollImportJob,3000);
+    const onVisible=()=>{if(document.visibilityState==="visible")void pollImportJob()};
+    document.addEventListener("visibilitychange",onVisible);
+
+    return ()=>{
+      stopped=true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange",onVisible);
+    };
+  },[authenticated]);
+
   function switchImportMode(mode:ImportMode){
     setImportMode(mode);
     setText(current=>normalizeImportText(current,mode));
@@ -752,14 +830,14 @@ export default function AdminPage(){
   async function analyzeLinks(){
     const ready=checks.filter(x=>x.status==="READY");
     const preflightDuplicates=checks.filter(x=>x.status==="DUPLICATE");
+
     if(!ready.length){
-      const duplicates=preflightDuplicates;
-      if(duplicates.length){
+      if(preflightDuplicates.length){
         setDuplicatePopup({
-          title:duplicates.length>1?"Link duplicate ditemukan":"Link duplicate ditemukan",
-          items:duplicates.map(row=>`${row.inputUrl} — ${row.reason}`)
+          title:preflightDuplicates.length>1?"Link duplicate ditemukan":"Link duplicate ditemukan",
+          items:preflightDuplicates.map(row=>`${row.inputUrl} — ${row.reason}`)
         });
-        setNotice("Produk sudah ada di katalog. Tidak dibuat duplikat.");
+        setNotice("Tidak ada link baru. Duplicate hanya dilewati dan tidak mengganggu link lainnya.");
       }else{
         setNotice("Tidak ada link baru yang valid.");
       }
@@ -767,163 +845,36 @@ export default function AdminPage(){
     }
 
     setBusy(true);
-    setNotice("");
+    setNotice(`Menyiapkan background import · ${ready.length} link...`);
 
-    let nextCatalog=[...catalog];
-    let nextResolved={...resolved};
-    let nextSequence=Math.max(0,...catalog.map(item=>item.sequence||0))+1;
-    let imported=0;
-    let resolvedDuplicates=0;
-    const resolvedDuplicateItems:string[]=[];
-    let failedImports=0;
-    const failedMessages:string[]=[];
-
-    for(let index=0;index<ready.length;index++){
-      const item=ready[index];
-      try{
-        setNotice(`Import ${index+1}/${ready.length} · resolve shortlink Blibli...`);
-
-        let data:ResolvedProduct|null=null;
-        let primaryError="";
-
-        try{
-          const res=await fetch("/api/resolve?url="+encodeURIComponent(item.inputUrl),{cache:"no-store"});
-          const primary:ResolvedProduct=await res.json();
-          if(primary.ok&&primary.canonicalProductId) data=primary;
-          else primaryError=primary.message||"Metadata belum lengkap";
-        }catch(error){
-          primaryError=error instanceof Error?error.message:"Backend tidak dapat membaca link Blibli.";
-        }
-
-        if(!data){
-          data=await resolveBlibliShortlinkFallback(item.inputUrl);
-        }
-
-        if(!data?.canonicalProductId){
-          throw new Error(primaryError||"Shortlink Blibli belum berhasil di-resolve.");
-        }
-
-        const productId=data.canonicalProductId.toUpperCase();
-        const canonicalKey=String(data.canonicalUrl||"").replace(/\/$/,"").toLowerCase();
-
-        // Shortlinks do not expose Product ID during pre-flight. Re-check after
-        // resolution so a second affiliate shortlink cannot create/overwrite the
-        // same product under a new sequence number.
-        const duplicate=nextCatalog.find(existing=>
-          String(existing.canonicalProductId||"").toUpperCase()===productId ||
-          (!!canonicalKey&&String(existing.canonicalUrl||"").replace(/\/$/,"").toLowerCase()===canonicalKey)
-        );
-        if(duplicate){
-          resolvedDuplicates++;
-          const existingLabel=duplicate.canonicalProductId||duplicate.canonicalUrl||duplicate.affiliateUrl||"produk yang sudah ada";
-          resolvedDuplicateItems.push(
-            `${item.inputUrl} → ${productId} sudah ada sebagai ${existingLabel}`
-          );
-          continue;
-        }
-
-        setNotice(`Import ${index+1}/${ready.length} · mencari image produk...`);
-        data=await enrichResolvedImages(data,item.inputUrl);
-
-        // Known exact galleries remain the strongest local fallback.
-        const knownImages=KNOWN_BLIBLI_GALLERIES[productId]||[];
-        const resolvedImages=sanitizeProductImages(
-          data.images?.length?data.images:(data.image?[data.image]:[])
-        );
-        if(knownImages.length>resolvedImages.length){
-          data={...data,image:knownImages[0]||null,images:knownImages.slice()};
-        }else{
-          data={...data,image:resolvedImages[0]||data.image||null,images:resolvedImages};
-        }
-
-        const finalImages=sanitizeProductImages(data.images?.length?data.images:(data.image?[data.image]:[]));
-        if(!finalImages.length){
-          throw new Error("Image produk belum berhasil ditemukan. Produk tidak disimpan agar Client tidak menerima card tanpa foto.");
-        }
-        data={...data,image:finalImages[0],images:finalImages};
-
-        const newItem:CatalogIdentity={
-          sequence:nextSequence++,
-          affiliateUrl:item.inputUrl,
-          canonicalProductId:data.canonicalProductId,
-          canonicalUrl:data.canonicalUrl
-        };
-
-        let candidateCatalog=[...nextCatalog,newItem];
-        let candidateResolved={...nextResolved,[item.inputUrl]:data};
-
-        // Save a Draft identity first because reloadDom works against Draft.
-        // Import is not considered successful yet and will be rolled back if no
-        // usable product gallery can be obtained.
-        const initialProduct=buildDbProducts(candidateCatalog,candidateResolved)
-          .find(product=>product.affiliateUrl===item.inputUrl);
-        if(!initialProduct) throw new Error("Data produk hasil resolve belum lengkap.");
-
-        let saveRes=await fetch("/api/catalog",{
-          method:"POST",
-          headers:{"content-type":"application/json"},
-          body:JSON.stringify({product:initialProduct})
-        });
-        let saveData=await saveRes.json();
-        if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Database sync awal gagal.");
-
-        // At this point the product has a validated image gallery. savePublish above
-        // writes Draft + Published, so Client receives the product only after image
-        // resolution has completed.
-        nextCatalog=candidateCatalog;
-        nextResolved=candidateResolved;
-        imported++;
-      }catch(error){
-        failedImports++;
-        failedMessages.push(error instanceof Error?error.message:"Import gagal.");
-      }
-    }
-
-    if(imported){
-      try{
-        const synced=await pushDatabase(nextCatalog,nextResolved);
-        if(synced?.length){
-          const local=dbToLocal(synced);
-          nextCatalog=local.catalog;
-          nextResolved=local.resolved;
-        }
-      }catch(error){
-        failedMessages.push("Sinkron final ke Client gagal: "+(error instanceof Error?error.message:"coba lagi"));
-      }
-    }
-
-    setCatalog(nextCatalog);
-    setResolved(nextResolved);
-    setText("");
-    setDirtyUrls(prev=>prev.filter(url=>!nextCatalog.some(item=>item.affiliateUrl===url)));
-    setServerReady(true);
-
-    const allDuplicateItems=[
-      ...preflightDuplicates.map(row=>`${row.inputUrl} — ${row.reason}`),
-      ...resolvedDuplicateItems
-    ];
-    const totalDuplicates=preflightDuplicates.length+resolvedDuplicates;
-    if(allDuplicateItems.length){
-      setDuplicatePopup({
-        title:allDuplicateItems.length>1?"Beberapa duplicate ditemukan":"Produk duplicate ditemukan",
-        items:allDuplicateItems
+    try{
+      const res=await fetch("/api/import-job",{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({links:ready.map(row=>row.inputUrl)})
       });
-    }
+      const data=await res.json();
+      const job=data?.job as ImportJobState|undefined;
+      if(!res.ok||!data?.ok||!job) throw new Error(data?.message||"Background import gagal dimulai.");
 
-    if(imported){
+      setImportJob(job);
+      setText("");
+
+      if(preflightDuplicates.length){
+        setDuplicatePopup({
+          title:preflightDuplicates.length>1?"Beberapa duplicate dilewati":"Link duplicate dilewati",
+          items:preflightDuplicates.map(row=>`${row.inputUrl} — ${row.reason}`)
+        });
+      }
+
       setNotice(
-        `✓ ${imported} produk baru berhasil di-import dan langsung sinkron ke Client.`+
-        (totalDuplicates?` ${totalDuplicates} link duplicate dilewati.`:"")+
-        (failedImports?` ${failedImports} link gagal.`:"")
+        `✓ Background import dimulai · ${job.total} link masuk antrean. `+
+        "Tab Admin boleh ditutup; proses tetap berjalan di Apps Script."
       );
-    }else if(preflightDuplicates.length+resolvedDuplicates){
-      setNotice(`Tidak ada produk baru. ${preflightDuplicates.length+resolvedDuplicates} link duplicate dilewati.`);
-    }else{
-      const detail=failedMessages[0]||"Identitas atau foto katalog belum dapat dibaca.";
-      setNotice("Import gagal: "+detail);
+    }catch(error){
+      setBusy(false);
+      setNotice("Import gagal dimulai: "+(error instanceof Error?error.message:"coba lagi"));
     }
-
-    setBusy(false);
   }
 
   async function pushSingleProduct(url:string,nextCatalog:CatalogIdentity[]=catalog,nextResolved:Record<string,ResolvedProduct>=resolved){
@@ -1244,16 +1195,28 @@ export default function AdminPage(){
         <p className="admin-login-copy">Masukkan password Admin untuk mengelola katalog Skill Fusion.</p>
         <form onSubmit={e=>{e.preventDefault();void loginAdmin();}}>
           <label className="admin-login-label" htmlFor="admin-password">Password Admin</label>
-          <input
-            id="admin-password"
-            type="password"
-            autoComplete="current-password"
-            value={loginPassword}
-            onChange={e=>setLoginPassword(e.target.value)}
-            placeholder="Masukkan password"
-            disabled={loginBusy}
-            autoFocus
-          />
+          <div className="admin-password-wrap">
+            <input
+              id="admin-password"
+              type={showPassword?"text":"password"}
+              autoComplete="current-password"
+              value={loginPassword}
+              onChange={e=>setLoginPassword(e.target.value)}
+              placeholder="Masukkan password"
+              disabled={loginBusy}
+              autoFocus
+            />
+            <button
+              type="button"
+              className="admin-password-toggle"
+              onClick={()=>setShowPassword(value=>!value)}
+              aria-label={showPassword?"Sembunyikan password":"Lihat password"}
+              title={showPassword?"Sembunyikan password":"Lihat password"}
+              disabled={loginBusy}
+            >
+              {showPassword?<EyeOff size={19}/>:<Eye size={19}/>}
+            </button>
+          </div>
           <label className="admin-remember">
             <input type="checkbox" checked={rememberLogin} onChange={e=>setRememberLogin(e.target.checked)} disabled={loginBusy}/>
             <span><strong>Remember me</strong><small>Simpan login di perangkat ini sampai Anda logout.</small></span>
@@ -1382,8 +1345,21 @@ export default function AdminPage(){
             ?"Single Link aktif — hanya 1 link yang akan diproses."
             :"Multiple Link aktif — link berantakan otomatis dipisah, dirapikan, dicek duplicate, lalu diproses satu per satu."
           }</p>
-          <button onClick={analyzeLinks} disabled={busy||!checks.length}>{busy?"Mengimpor...":"Import Produk"}</button>
+          <button onClick={analyzeLinks} disabled={busy||!checks.length}>
+            {busy&&importJob&&(importJob.status==="queued"||importJob.status==="running")
+              ?`Import ${importJob.done}/${importJob.total}`
+              :(busy?"Menyiapkan...":"Import Produk")}
+          </button>
         </div>
+        {importJob&&(importJob.status==="queued"||importJob.status==="running")&&<div className="import-job-progress">
+          <div className="import-job-progress-head">
+            <strong>BACKGROUND IMPORT</strong>
+            <span>{importJob.done}/{importJob.total}</span>
+          </div>
+          <div className="import-job-track"><i style={{width:`${importJob.total?Math.min(100,Math.round(importJob.done/importJob.total*100)):0}%`}}/></div>
+          <small>{importJob.imported} berhasil · {importJob.duplicates} duplicate · {importJob.failed} gagal</small>
+          <small>Proses tersimpan di Apps Script dan tetap berjalan walaupun tab ini ditutup.</small>
+        </div>}
         {notice&&<div className="notice">{notice}</div>}
       </section>
 

@@ -50,6 +50,20 @@ function requestAppsScriptJsonp(action:string,payload:Record<string,unknown>={})
   });
 }
 
+function appsScriptHtmlError(text:string,status:number,url:string){
+  const value=String(text||"");
+  if(/accounts\.google\.com|ServiceLogin|Sign in with Google|Masuk.*Google/i.test(value)){
+    return new Error("Web App Apps Script meminta login Google. Pada deployment, set 'Who has access' ke 'Anyone', lalu deploy ulang.");
+  }
+  if(status===404||/Page Not Found|file you have requested does not exist/i.test(value)){
+    return new Error("URL Web App Apps Script tidak aktif atau deployment sudah diganti. Gunakan URL /exec dari deployment aktif.");
+  }
+  if(/Authorization is required|You need permission|access denied/i.test(value)){
+    return new Error("Akses Web App Apps Script belum publik. Ubah akses deployment menjadi 'Anyone'.");
+  }
+  return new Error("Apps Script merespons halaman non-JSON. Deployment Web App ada, tetapi akses/URL deployment perlu diperiksa.");
+}
+
 export async function requestAppsScript(action:string, payload:Record<string,unknown>={}, key?:string){
   const isPublicGet=action==="catalog"||action==="health"||action==="price";
 
@@ -85,8 +99,10 @@ export async function requestAppsScript(action:string, payload:Record<string,unk
     const response=await globalThis.fetch(url.toString(),options);
     const text=await response.text();
     let data;
-    try{data=JSON.parse(text)}catch{
-      throw new Error("Apps Script belum aktif. Deploy versi terbaru Code.gs sebagai Web app.");
+    try{
+      data=JSON.parse(text);
+    }catch{
+      throw appsScriptHtmlError(text,response.status,response.url||url.toString());
     }
 
     if(!response.ok||!data?.ok){

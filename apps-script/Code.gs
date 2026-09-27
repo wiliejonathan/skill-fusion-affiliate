@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:16,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:17,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -63,12 +63,14 @@ function doPost(e){
     try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
     const action=String(p.action||'');
     if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
+    if(action==='importStatus')return output_(importJobStatus_());
     if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
-    if(['savePublish','reloadDom','reload','reloadAll','repairMissingImages','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
+    if(['importStart','savePublish','reloadDom','reload','reloadAll','repairMissingImages','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
     lock=LockService.getScriptLock();
     if(!lock.tryLock(30000))throw new Error('Database sedang diproses. Coba lagi.');
     let out;
-    if(action==='savePublish')out=savePublish_(p);
+    if(action==='importStart')out=startImportJob_(p.links);
+    else if(action==='savePublish')out=savePublish_(p);
     else if(action==='reloadDom')out=reloadDom_(String(p.url||''));
     else if(action==='reload')out=reloadOne_(String(p.id||''));
     else if(action==='reloadAll')out=reloadAll_();
@@ -80,6 +82,229 @@ function doPost(e){
     return output_(out);
   }catch(err){return output_({ok:false,code:err.code||'ERROR',message:String(err.message||err)})}
   finally{if(lock&&lock.hasLock())lock.releaseLock()}
+}
+
+
+const IMPORT_JOB_PROPERTY = 'SKILL_FUSION_IMPORT_JOB_V1';
+const IMPORT_TRIGGER_HANDLER = 'processImportQueueTrigger';
+
+function importProperties_(){
+  if(typeof PropertiesService==='undefined')throw new Error('PropertiesService tidak tersedia');
+  return PropertiesService.getScriptProperties();
+}
+function readImportJob_(){
+  try{
+    const raw=importProperties_().getProperty(IMPORT_JOB_PROPERTY);
+    return raw?JSON.parse(raw):null;
+  }catch(e){return null}
+}
+function writeImportJob_(job){
+  job.updatedAt=new Date().toISOString();
+  importProperties_().setProperty(IMPORT_JOB_PROPERTY,JSON.stringify(job));
+  return job;
+}
+function importJobView_(job){
+  if(!job)return {ok:true,job:null};
+  return {
+    ok:true,
+    job:{
+      id:job.id,
+      status:job.status,
+      total:Number(job.total||0),
+      done:Number(job.done||0),
+      imported:Number(job.imported||0),
+      duplicates:Number(job.duplicates||0),
+      failed:Number(job.failed||0),
+      currentUrl:job.currentUrl||'',
+      messages:Array.isArray(job.messages)?job.messages.slice(-20):[],
+      createdAt:job.createdAt||'',
+      updatedAt:job.updatedAt||''
+    }
+  };
+}
+function importJobStatus_(){
+  return importJobView_(readImportJob_());
+}
+function uniqueImportLinks_(links){
+  const seen={},out=[];
+  (Array.isArray(links)?links:[]).forEach(function(raw){
+    const url=String(raw||'').trim();
+    if(!url||seen[url])return;
+    validBlibliUrl_(url);
+    seen[url]=true;
+    out.push(url);
+  });
+  if(!out.length)throw new Error('Tidak ada link Blibli valid untuk di-import');
+  if(out.length>60)throw new Error('Maksimal 60 link per batch import');
+  return out;
+}
+function clearImportTriggers_(){
+  if(typeof ScriptApp==='undefined')return;
+  ScriptApp.getProjectTriggers().forEach(function(trigger){
+    if(trigger.getHandlerFunction()===IMPORT_TRIGGER_HANDLER)ScriptApp.deleteTrigger(trigger);
+  });
+}
+function scheduleImportTrigger_(){
+  if(typeof ScriptApp==='undefined')throw new Error('ScriptApp tidak tersedia untuk background import');
+  clearImportTriggers_();
+  ScriptApp.newTrigger(IMPORT_TRIGGER_HANDLER).timeBased().after(3000).create();
+}
+function startImportJob_(links){
+  const active=readImportJob_();
+  if(active&&(active.status==='queued'||active.status==='running')){
+    const e=new Error('Masih ada proses import yang berjalan. Tunggu sampai selesai.');
+    e.code='IMPORT_RUNNING';
+    throw e;
+  }
+
+  const clean=uniqueImportLinks_(links);
+  const now=new Date().toISOString();
+  const job={
+    id:'IMP-'+Date.now(),
+    status:'queued',
+    links:clean,
+    cursor:0,
+    total:clean.length,
+    done:0,
+    imported:0,
+    duplicates:0,
+    failed:0,
+    currentUrl:'',
+    messages:[],
+    createdAt:now,
+    updatedAt:now
+  };
+  writeImportJob_(job);
+  scheduleImportTrigger_();
+  log_('IMPORT_JOB',job.id,'QUEUED',clean.length+' link');
+  return importJobView_(job);
+}
+function importProductFromResolved_(resolved,url){
+  const id=String(resolved&&resolved.canonicalProductId||'').toUpperCase();
+  const canonical=String(resolved&&resolved.canonicalUrl||'');
+  const name=String(resolved&&resolved.title||titleFromUrl_(canonical)||'Produk Blibli').trim();
+  const images=rankProductImages_(
+    Array.isArray(resolved&&resolved.images)?resolved.images:(resolved&&resolved.image?[resolved.image]:[]),
+    id
+  ).slice(0,12);
+
+  if(!id)throw new Error('Product ID tidak ditemukan');
+  if(!images.length)throw new Error('Image produk belum berhasil ditemukan');
+
+  return {
+    sequence:0,
+    id:id,
+    canonicalProductId:id,
+    name:name,
+    brand:inferBrand_(name,id),
+    category:'Charging & Cable',
+    images:images,
+    affiliateUrl:url,
+    canonicalUrl:canonical,
+    badge:'Blibli Affiliate',
+    features:inferFeatures_(name),
+    price:resolved.price||'',
+    currency:resolved.currency||'',
+    description:resolved.description||'',
+    priceUpdatedAt:resolved.priceUpdatedAt||'',
+    pickupPointCode:resolved.pickupPointCode||'',
+    variants:resolved.variants||[],
+    soldText:resolved.soldText||'',
+    originalPrice:resolved.originalPrice||'',
+    discountPercent:resolved.discountPercent||'',
+    specifications:resolved.specifications||[],
+    source:'background-import'
+  };
+}
+function processImportQueueTrigger(){
+  let lock=null;
+  try{
+    if(typeof LockService!=='undefined'){
+      lock=LockService.getScriptLock();
+      if(!lock.tryLock(5000)){
+        scheduleImportTrigger_();
+        return;
+      }
+    }
+
+    let job=readImportJob_();
+    if(!job||(['queued','running'].indexOf(job.status)<0)){
+      clearImportTriggers_();
+      return;
+    }
+
+    job.status='running';
+    writeImportJob_(job);
+    const started=Date.now();
+    let processed=0;
+
+    while(job.cursor<job.links.length&&processed<6&&(Date.now()-started)<240000){
+      const url=String(job.links[job.cursor]||'');
+      job.currentUrl=url;
+      writeImportJob_(job);
+
+      try{
+        const existing=readProducts_(DRAFT_SHEET);
+        const sameUrl=existing.find(function(p){return p.affiliateUrl===url});
+        if(sameUrl){
+          job.duplicates++;
+          job.messages.push('Duplicate dilewati: '+url);
+        }else{
+          const resolved=resolveProduct_(url);
+          const id=String(resolved.canonicalProductId||'').toUpperCase();
+          const canonical=String(resolved.canonicalUrl||'').replace(/\/$/,'').toLowerCase();
+          const duplicate=existing.find(function(p){
+            return String(p.id||'').toUpperCase()===id||
+              (!!canonical&&String(p.canonicalUrl||'').replace(/\/$/,'').toLowerCase()===canonical);
+          });
+
+          if(duplicate){
+            job.duplicates++;
+            job.messages.push('Duplicate Product ID dilewati: '+id);
+          }else{
+            const product=importProductFromResolved_(resolved,url);
+            savePublish_({product:product});
+            job.imported++;
+            job.messages.push('Berhasil: '+product.id+' · '+product.images.length+' image');
+          }
+        }
+      }catch(e){
+        job.failed++;
+        job.messages.push('Gagal: '+url+' · '+String(e&&e.message||e).slice(0,220));
+      }
+
+      job.cursor++;
+      job.done=job.cursor;
+      job.currentUrl='';
+      if(job.messages.length>30)job.messages=job.messages.slice(-30);
+      writeImportJob_(job);
+      processed++;
+    }
+
+    if(job.cursor>=job.links.length){
+      job.status='completed';
+      job.currentUrl='';
+      writeImportJob_(job);
+      clearImportTriggers_();
+      log_('IMPORT_JOB',job.id,'DONE',job.imported+' imported · '+job.duplicates+' duplicate · '+job.failed+' failed');
+    }else{
+      writeImportJob_(job);
+      scheduleImportTrigger_();
+    }
+  }catch(e){
+    const job=readImportJob_();
+    if(job){
+      job.status='error';
+      job.currentUrl='';
+      job.messages=Array.isArray(job.messages)?job.messages:[];
+      job.messages.push('Worker error: '+String(e&&e.message||e).slice(0,240));
+      writeImportJob_(job);
+      log_('IMPORT_JOB',job.id,'ERROR',String(e&&e.message||e).slice(0,240));
+    }
+    try{clearImportTriggers_()}catch(ignore){}
+  }finally{
+    if(lock&&lock.hasLock())lock.releaseLock();
+  }
 }
 
 function validBlibliUrl_(url){
