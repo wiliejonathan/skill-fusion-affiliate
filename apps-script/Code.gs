@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:11,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:12,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -309,7 +309,8 @@ function reloadFromBlibli_(p){
 
   const pricingUrl=productId_(resolved.finalUrl||'')?(resolved.finalUrl||canonical):canonical;
   const pickupPointCode=pickupPointCode_(pricingUrl)||p.pickupPointCode||'';
-  const html=fetchText_(pricingUrl);
+  const pageSession=blibliSession_(pricingUrl);
+  const html=fetchTextSession_(pricingUrl,pageSession)||fetchText_(pricingUrl);
   const domData=extractBlibliDomData_(html);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
 
@@ -319,7 +320,7 @@ function reloadFromBlibli_(p){
   const htmlImages=extractBlibliGallery_(html,canonical);
   let gathered=heroImages.concat(htmlImages);
 
-  const summary=summaryData_(canonical,id,pricingUrl);
+  const summary=summaryData_(canonical,id,pricingUrl,pageSession);
   if(isUsableProductTitle_(summary.title))title=summary.title;
   gathered=gathered.concat(summary.images);
 
@@ -356,12 +357,12 @@ function reloadFromBlibli_(p){
     (seoData.variants&&seoData.variants.length?seoData.variants:null)||
     p.variants||[]
   );
-  const specifications=normalizeSpecifications_((domData.specifications&&domData.specifications.length?domData.specifications:p.specifications)||[]);
-  const soldText=cleanSoldText_(domData.soldText||p.soldText||'');
-  const originalPrice=normalizePrice_(domData.originalPrice||p.originalPrice||'');
-  const discountPercent=normalizeDiscountPercent_(domData.discountPercent||p.discountPercent||'');
-  const brand=domData.brand||specValue_(specifications,'Merk')||p.brand||inferBrand_(title,id);
-  const category=domData.category||specValue_(specifications,'Kategori')||p.category||'';
+  const specifications=normalizeSpecifications_((domData.specifications&&domData.specifications.length?domData.specifications:(summary.specifications&&summary.specifications.length?summary.specifications:p.specifications))||[]);
+  const soldText=cleanSoldText_(domData.soldText||summary.soldText||p.soldText||'');
+  const originalPrice=normalizePrice_(domData.originalPrice||summary.originalPrice||p.originalPrice||'');
+  const discountPercent=normalizeDiscountPercent_(domData.discountPercent||summary.discountPercent||p.discountPercent||'');
+  const brand=domData.brand||summary.brand||specValue_(specifications,'Merk')||p.brand||inferBrand_(title,id);
+  const category=domData.category||summary.category||specValue_(specifications,'Kategori')||p.category||'';
   if(!isUsableProductTitle_(title))title=p.name;
   return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:brand,category:category,features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,originalPrice:originalPrice,discountPercent:discountPercent,soldText:soldText,description:description,specifications:specifications,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
@@ -543,6 +544,353 @@ function fetchJsonFast_(url,referer){
   }
   return null;
 }
+function headerValues_(headers,name){
+  const out=[];
+  const wanted=String(name||'').toLowerCase();
+  Object.keys(headers||{}).forEach(function(key){
+    if(String(key).toLowerCase()!==wanted)return;
+    const value=headers[key];
+    if(Array.isArray(value))value.forEach(function(v){if(v!==null&&v!==undefined)out.push(String(v))});
+    else if(value!==null&&value!==undefined)out.push(String(value));
+  });
+  return out;
+}
+function mergeSessionCookies_(session,headers){
+  if(!session)session={cookies:{}};
+  if(!session.cookies)session.cookies={};
+  headerValues_(headers,'set-cookie').forEach(function(raw){
+    // Apps Script may expose multiple Set-Cookie headers either as an array or
+    // as one comma-joined string. Match cookie starts without treating Path,
+    // Expires, SameSite, etc. as cookies.
+    const re=/(?:^|,\s*)([!#$%&'*+\-.^_`|~0-9A-Za-z]+)=([^;,]*)/g;
+    let m;
+    while((m=re.exec(String(raw||'')))){
+      const key=String(m[1]||'').trim();
+      if(!key||/^(?:path|expires|max-age|domain|samesite|secure|httponly)$/i.test(key))continue;
+      session.cookies[key]=String(m[2]||'').trim();
+    }
+  });
+  return session;
+}
+function sessionCookieHeader_(session){
+  const cookies=(session&&session.cookies)||{};
+  return Object.keys(cookies).map(function(key){return key+'='+cookies[key]}).join('; ');
+}
+function responseDiagnostic_(label,response){
+  try{
+    const code=response.getResponseCode();
+    const headers=response.getAllHeaders()||{};
+    const type=(headerValues_(headers,'content-type')[0]||'').split(';')[0];
+    const body=response.getContentText()||'';
+    return label+':'+code+(type?':'+type:'')+':'+body.length+'b';
+  }catch(e){
+    return label+':ERR';
+  }
+}
+function blibliSession_(referer){
+  const session={cookies:{},ua:PRODUCT_FETCH_UAS[1],diagnostics:[]};
+  if(typeof UrlFetchApp==='undefined')return session;
+  const targets=[];
+  const ref=String(referer||'');
+  if(/^https:\/\/(?:www\.)?blibli\.com(?:[/?#]|$)/i.test(ref))targets.push(ref);
+  targets.push('https://www.blibli.com/');
+  const seen={};
+  for(let i=0;i<targets.length&&i<2;i++){
+    const target=targets[i];
+    if(seen[target])continue;
+    seen[target]=true;
+    try{
+      const r=UrlFetchApp.fetch(target,{
+        muteHttpExceptions:true,
+        followRedirects:true,
+        headers:{
+          Accept:'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language':'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Cache-Control':'no-cache',
+          Pragma:'no-cache',
+          'Upgrade-Insecure-Requests':'1',
+          'Sec-Fetch-Dest':'document',
+          'Sec-Fetch-Mode':'navigate',
+          'Sec-Fetch-Site':'none',
+          'User-Agent':session.ua
+        }
+      });
+      mergeSessionCookies_(session,r.getAllHeaders()||{});
+      session.diagnostics.push(responseDiagnostic_('warmup'+i,r));
+      const code=r.getResponseCode();
+      if(code>=200&&code<400&&sessionCookieHeader_(session))break;
+    }catch(e){
+      session.diagnostics.push('warmup'+i+':ERR:'+String(e&&e.message||e).slice(0,120));
+    }
+  }
+  return session;
+}
+function fetchJsonSession_(url,referer,session){
+  if(typeof UrlFetchApp==='undefined')return null;
+  session=session||blibliSession_(referer);
+  const uas=[session.ua||PRODUCT_FETCH_UAS[1],PRODUCT_FETCH_UAS[2],PRODUCT_FETCH_UAS[0]];
+  for(let i=0;i<uas.length;i++){
+    try{
+      const cookie=sessionCookieHeader_(session);
+      const headers={
+        Accept:'application/json,text/plain,*/*',
+        'Accept-Language':'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control':'no-cache',
+        Pragma:'no-cache',
+        Referer:referer||'https://www.blibli.com/',
+        Origin:'https://www.blibli.com',
+        'X-Requested-With':'XMLHttpRequest',
+        'Sec-Fetch-Dest':'empty',
+        'Sec-Fetch-Mode':'cors',
+        'Sec-Fetch-Site':'same-origin',
+        'User-Agent':uas[i]
+      };
+      if(cookie)headers.Cookie=cookie;
+      const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:headers});
+      mergeSessionCookies_(session,r.getAllHeaders()||{});
+      session.diagnostics.push(responseDiagnostic_('json'+i,r));
+      const code=r.getResponseCode();
+      if(code<200||code>=300)continue;
+      let body=r.getContentText()||'';
+      if(!body)continue;
+      body=body.replace(/^\s*for\s*\(\s*;\s*;\s*\)\s*;?\s*/,'');
+      const parsed=JSON.parse(body);
+      if(parsed)return parsed;
+    }catch(e){
+      session.diagnostics.push('json'+i+':ERR:'+String(e&&e.message||e).slice(0,120));
+    }
+  }
+  return null;
+}
+function fetchTextSession_(url,session){
+  if(typeof UrlFetchApp==='undefined')return '';
+  session=session||blibliSession_(url);
+  try{
+    const cookie=sessionCookieHeader_(session);
+    const headers={
+      Accept:'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language':'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Cache-Control':'no-cache',
+      Pragma:'no-cache',
+      'Upgrade-Insecure-Requests':'1',
+      'Sec-Fetch-Dest':'document',
+      'Sec-Fetch-Mode':'navigate',
+      'Sec-Fetch-Site':'same-origin',
+      'User-Agent':session.ua||PRODUCT_FETCH_UAS[1]
+    };
+    if(cookie)headers.Cookie=cookie;
+    const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:headers});
+    mergeSessionCookies_(session,r.getAllHeaders()||{});
+    session.diagnostics.push(responseDiagnostic_('html',r));
+    if(r.getResponseCode()>=200&&r.getResponseCode()<400)return r.getContentText()||'';
+  }catch(e){
+    session.diagnostics.push('html:ERR:'+String(e&&e.message||e).slice(0,120));
+  }
+  return '';
+}
+function recursiveScalarByKeys_(value,keys){
+  const wanted={};
+  (keys||[]).forEach(function(key){wanted[String(key).toLowerCase().replace(/[^a-z0-9]/g,'')]=true});
+  let found='';
+  function visit(node){
+    if(found!==''||node===null||node===undefined)return;
+    if(Array.isArray(node)){for(let i=0;i<node.length&&!found;i++)visit(node[i]);return}
+    if(typeof node!=='object')return;
+    const own=Object.keys(node);
+    for(let i=0;i<own.length;i++){
+      const key=own[i];
+      const normalized=String(key).toLowerCase().replace(/[^a-z0-9]/g,'');
+      const child=node[key];
+      if(wanted[normalized]&&(typeof child==='string'||typeof child==='number')){
+        const text=String(child).trim();
+        if(text){found=text;return}
+      }
+    }
+    for(let i=0;i<own.length&&!found;i++){
+      const child=node[own[i]];
+      if(child&&typeof child==='object')visit(child);
+    }
+  }
+  visit(value);
+  return found;
+}
+function formatSoldCount_(value){
+  const raw=cleanInlineText_(value);
+  if(!raw)return '';
+  if(/^terjual\b/i.test(raw))return raw.slice(0,80);
+  if(/[a-z]/i.test(raw))return cleanSoldText_(raw);
+  const n=Number(String(raw).replace(/[^0-9]/g,''));
+  if(!isFinite(n)||n<=0)return cleanSoldText_(raw);
+  if(n>=1000000){
+    const v=Math.round(n/100000)/10;
+    return 'Terjual '+String(v).replace('.',',')+' jt';
+  }
+  if(n>=1000){
+    const v=Math.round(n/100)/10;
+    return 'Terjual '+String(v).replace('.',',')+' rb';
+  }
+  return 'Terjual '+String(n);
+}
+function extractSummaryRichVariants_(value){
+  const groups={},order=[];
+  function ensure(name){
+    const label=String(name||'Varian').replace(/\s+/g,' ').trim()||'Varian';
+    const key=label.toLowerCase();
+    if(!groups[key]){groups[key]={name:label,selected:'',values:[],map:{}};order.push(key)}
+    return groups[key];
+  }
+  function add(name,val,meta){
+    const label=String(val||'').replace(/\s+/g,' ').trim();
+    if(!label||label.length>100)return;
+    const g=ensure(name),key=label.toLowerCase();
+    let o=g.map[key];
+    if(!o){
+      o={name:label,image:'',selected:false,outOfStock:false,_availabilityKnown:false};
+      g.map[key]=o;g.values.push(o);
+    }
+    meta=meta||{};
+    if(meta.image&&!o.image)o.image=normalizeImage_(meta.image);
+    if(meta.selected){o.selected=true;g.selected=label}
+    if(meta.availabilityKnown){
+      o.outOfStock=!!meta.outOfStock;
+      o._availabilityKnown=true;
+    }
+  }
+  function visit(node){
+    if(!node)return;
+    if(Array.isArray(node)){node.forEach(visit);return}
+    if(typeof node!=='object')return;
+
+    if(Array.isArray(node.attributes)){
+      const selected=!!(node.selected||node.isSelected||node.active||node.isActive);
+      const availabilityKnown=
+        node.available!==undefined||node.inStock!==undefined||node.disabled!==undefined||
+        node.outOfStock!==undefined||node.isAvailable!==undefined;
+      const outOfStock=
+        node.available===false||node.inStock===false||node.disabled===true||
+        node.outOfStock===true||node.isAvailable===false;
+      const image=node.image||node.imageUrl||node.thumbnail||node.thumbnailUrl||'';
+      node.attributes.forEach(function(attr){
+        if(!attr||typeof attr!=='object')return;
+        const name=attr.name||attr.label||attr.attributeName||attr.variantName||'Varian';
+        const val=attr.value||attr.selectedValue||attr.displayValue||attr.text||'';
+        if(val)add(name,val,{selected:selected,availabilityKnown:availabilityKnown,outOfStock:outOfStock,image:image});
+      });
+    }
+
+    if((node.name||node.attributeName)&&Array.isArray(node.values)){
+      const name=node.name||node.attributeName;
+      node.values.forEach(function(v){
+        if(v===null||v===undefined)return;
+        if(typeof v==='string'||typeof v==='number')add(name,v,{});
+        else if(typeof v==='object'){
+          add(name,v.value||v.name||v.label||v.text||v.displayName||'',{
+            selected:!!(v.selected||v.isSelected),
+            availabilityKnown:v.available!==undefined||v.inStock!==undefined||v.disabled!==undefined||v.outOfStock!==undefined,
+            outOfStock:v.available===false||v.inStock===false||v.disabled===true||v.outOfStock===true,
+            image:v.image||v.imageUrl||v.thumbnail||v.thumbnailUrl||''
+          });
+        }
+      });
+    }
+
+    Object.keys(node).forEach(function(key){
+      const child=node[key];
+      if(child&&typeof child==='object')visit(child);
+    });
+  }
+  visit(value);
+
+  // Preserve values found by the older broad extractor when the richer option
+  // objects expose only the currently-selected SKU.
+  extractSummaryVariants_(value).forEach(function(group){
+    (group.values||[]).forEach(function(v){
+      const name=typeof v==='object'?(v.name||v.value||''):v;
+      add(group.name,name,{selected:group.selected&&String(group.selected)===String(name)});
+    });
+  });
+
+  return order.map(function(key){
+    const g=groups[key];
+    return {name:g.name,selected:g.selected,values:g.values.map(function(o){
+      return {name:o.name,image:o.image,selected:o.selected,outOfStock:o.outOfStock};
+    })};
+  }).filter(function(g){return g.values.length}).slice(0,12);
+}
+function extractSummarySpecifications_(value){
+  const rows=[],seen={};
+  function add(label,val){
+    const l=cleanInlineText_(label).replace(/:\s*$/,'').trim();
+    const v=cleanInlineText_(val);
+    if(!l||!v||l.length>100||v.length>1000)return;
+    const key=l.toLowerCase();
+    if(seen[key])return;
+    seen[key]=true;rows.push({label:l,value:v});
+  }
+  const brand=(value&&value.brand&&typeof value.brand==='object'&&(value.brand.name||value.brand.label))||
+    (value&&typeof value.brand==='string'?value.brand:'')||
+    recursiveScalarByKeys_(value,['brandName']);
+  if(brand)add('Merk',brand);
+
+  let category='';
+  const cats=(value&&Array.isArray(value.categories)&&value.categories)||
+    (value&&Array.isArray(value.masterCategories)&&value.masterCategories)||[];
+  if(cats.length){
+    const sorted=cats.slice().sort(function(a,b){return Number((a&&a.level)||0)-Number((b&&b.level)||0)});
+    for(let i=sorted.length-1;i>=0;i--){
+      const row=sorted[i];
+      const name=row&&typeof row==='object'?(row.name||row.label||row.displayName):row;
+      if(name){category=String(name);break}
+    }
+  }
+  if(!category)category=recursiveScalarByKeys_(value,['categoryName']);
+  if(category)add('Kategori',category);
+
+  function scan(node,inSpecs){
+    if(!node)return;
+    if(Array.isArray(node)){node.forEach(function(x){scan(x,inSpecs)});return}
+    if(typeof node!=='object')return;
+    const label=node.label||node.key||node.specificationName||(inSpecs?node.name:'');
+    const val=node.value||node.text||node.displayValue||node.specificationValue;
+    if(inSpecs&&label&&val&&(typeof val==='string'||typeof val==='number'))add(label,val);
+    Object.keys(node).forEach(function(key){
+      const child=node[key];
+      if(!child||typeof child!=='object')return;
+      const next=inSpecs||/specification|specifications|productdetails|additionalinformation|technicaldetails/i.test(key);
+      scan(child,next);
+    });
+  }
+  scan(value,false);
+  return normalizeSpecifications_(rows);
+}
+function extractSummaryCommerce_(value){
+  const priceData=extractSummaryPrice_(value);
+  const price=normalizePrice_(priceData.price);
+  const originalPrice=normalizePrice_(recursiveScalarByKeys_(value,[
+    'originalPrice','strikePrice','strikethroughPrice','strikeThroughPrice',
+    'beforeDiscount','regularPrice','basePrice','wasPrice'
+  ]));
+  let discountPercent=normalizeDiscountPercent_(recursiveScalarByKeys_(value,[
+    'discountPercentage','discountPercent','percentageDiscount','discountRate','discountPercentageValue'
+  ]));
+  if(!discountPercent&&price&&originalPrice&&Number(originalPrice)>Number(price)){
+    discountPercent=normalizeDiscountPercent_(Math.round((Number(originalPrice)-Number(price))*100/Number(originalPrice)));
+  }
+  const soldRaw=recursiveScalarByKeys_(value,['sold','soldCount','totalSold','soldQuantity','quantitySold']);
+  const specifications=extractSummarySpecifications_(value);
+  return {
+    price:price,
+    currency:priceData.currency||'IDR',
+    originalPrice:originalPrice,
+    discountPercent:discountPercent,
+    soldText:formatSoldCount_(soldRaw),
+    description:extractSummaryDescription_(value),
+    variants:extractSummaryRichVariants_(value),
+    specifications:specifications,
+    brand:specValue_(specifications,'Merk'),
+    category:specValue_(specifications,'Kategori')
+  };
+}
 function fetchTextFast_(url){
   const uas=[PRODUCT_FETCH_UAS[0],PRODUCT_FETCH_UAS[1]];
   for(let i=0;i<uas.length;i++){
@@ -660,7 +1008,7 @@ function selectedVariantPagePrice_(p){
 }
 function fastSummaryPrice_(p){
   const id=String(p&&p.id||'').trim();
-  if(!id)return {price:'',currency:'',pickupPointCode:p&&p.pickupPointCode||'',description:'',variants:[]};
+  if(!id)return {price:'',currency:'',pickupPointCode:p&&p.pickupPointCode||'',description:'',variants:[],originalPrice:'',discountPercent:'',soldText:'',specifications:[],brand:'',category:'',fetchDiagnostics:[]};
 
   const referer=String(p.canonicalUrl||p.affiliateUrl||'https://www.blibli.com/');
   let pickupPointCode=String(p.pickupPointCode||'').trim();
@@ -674,49 +1022,42 @@ function fastSummaryPrice_(p){
 
   const pickupQuery=pickupPointCode?'pickupPointCode='+encodeURIComponent(pickupPointCode):'';
   const endpoints=[
-    'https://www.blibli.com/backend/product-detail/products/is--'+
-    encodeURIComponent(id)+
-    '/_summary'+
-    (pickupQuery?'?'+pickupQuery:'')
+    'https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'+(pickupQuery?'?'+pickupQuery:'')
   ];
 
   const productSku=id.replace(/-\d{5}$/,'');
   if(productSku!==id){
-    let url=
-      'https://www.blibli.com/backend/product-detail/products/ps--'+
-      encodeURIComponent(productSku)+
-      '/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false';
+    let url='https://www.blibli.com/backend/product-detail/products/ps--'+encodeURIComponent(productSku)+'/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false';
     if(pickupQuery)url+='&'+pickupQuery;
     endpoints.push(url);
   }
 
-  let best={price:'',currency:'',pickupPointCode:pickupPointCode,description:'',variants:[]};
+  const session=blibliSession_(referer);
+  let best={price:'',currency:'',pickupPointCode:pickupPointCode,description:'',variants:[],originalPrice:'',discountPercent:'',soldText:'',specifications:[],brand:'',category:'',fetchDiagnostics:session.diagnostics};
 
   for(let i=0;i<endpoints.length;i++){
-    const payload=fetchJsonFast_(endpoints[i],referer);
+    const payload=fetchJsonSession_(endpoints[i],referer,session)||fetchJsonFast_(endpoints[i],referer);
     if(!payload)continue;
     const data=payload.data||payload;
+    const commerce=extractSummaryCommerce_(data);
 
-    let priceData=extractSummaryPrice_(data);
-    if(!priceData.price)priceData=extractSerializedPrice_(JSON.stringify(data));
-
-    const description=extractSummaryDescription_(data);
-    const variants=extractSummaryVariants_(data);
-
-    if(description.length>best.description.length)best.description=description;
-    if(variants.length>best.variants.length)best.variants=variants;
-
-    const price=normalizePrice_(priceData.price);
-    if(price){
-      best.price=price;
-      best.currency=priceData.currency||'IDR';
-      // Keep looping once to collect richer product-level attributes/options.
+    if(commerce.description.length>best.description.length)best.description=commerce.description;
+    if(commerce.variants.length>best.variants.length)best.variants=commerce.variants;
+    if(commerce.specifications.length>best.specifications.length)best.specifications=commerce.specifications;
+    if(commerce.originalPrice)best.originalPrice=commerce.originalPrice;
+    if(commerce.discountPercent)best.discountPercent=commerce.discountPercent;
+    if(commerce.soldText)best.soldText=commerce.soldText;
+    if(commerce.brand)best.brand=commerce.brand;
+    if(commerce.category)best.category=commerce.category;
+    if(commerce.price){
+      best.price=commerce.price;
+      best.currency=commerce.currency||'IDR';
     }
   }
-
+  best.fetchDiagnostics=(session.diagnostics||[]).slice(-12);
   return best;
 }
-function summaryData_(canonical,id,contextUrl){
+function summaryData_(canonical,id,contextUrl,sessionArg){
   let pickupPointCode='';
   try{
     pickupPointCode=parseHttpUrl_(String(contextUrl||canonical)).searchParams.get('pickupPointCode')||'';
@@ -732,40 +1073,51 @@ function summaryData_(canonical,id,contextUrl){
     endpoints.push(productUrl);
   }
 
-  let title='',images=[],price='',currency='',description='',variants=[];
+  const session=sessionArg||blibliSession_(contextUrl||canonical);
+  let title='',images=[],price='',currency='',description='',variants=[],originalPrice='',discountPercent='',soldText='',specifications=[],brand='',category='';
+
   endpoints.forEach(function(u){
-    const j=fetchJson_(u,canonical);
+    const j=fetchJsonSession_(u,canonical,session)||fetchJson_(u,canonical);
     if(!j)return;
     const data=j.data||j;
     if(data&&data.name)title=String(data.name);
 
     const productCode=data&&typeof data.productCode==='string'?String(data.productCode):'';
     let current=collectSummaryImages_(data,canonical);
-
     if(/^MTA-\d+$/i.test(productCode)){
-      const exact=current.filter(function(src){
-        return src.toUpperCase().indexOf(productCode.toUpperCase())>=0;
-      });
+      const exact=current.filter(function(src){return src.toUpperCase().indexOf(productCode.toUpperCase())>=0});
       if(exact.length)current=exact;
     }
     images=images.concat(current);
 
-    let priceData=extractSummaryPrice_(data);
-    if(!priceData.price)priceData=extractSerializedPrice_(JSON.stringify(data));
-    if(priceData.price){
-      price=priceData.price;
-      currency=priceData.currency||currency||'IDR';
-    }
-
-    const currentDescription=extractSummaryDescription_(data);
-    if(currentDescription.length>description.length)description=currentDescription;
-
-    const currentVariants=extractSummaryVariants_(data);
-    if(currentVariants.length>variants.length)variants=currentVariants;
+    const commerce=extractSummaryCommerce_(data);
+    if(commerce.price){price=commerce.price;currency=commerce.currency||currency||'IDR'}
+    if(commerce.description.length>description.length)description=commerce.description;
+    if(commerce.variants.length>variants.length)variants=commerce.variants;
+    if(commerce.specifications.length>specifications.length)specifications=commerce.specifications;
+    if(commerce.originalPrice)originalPrice=commerce.originalPrice;
+    if(commerce.discountPercent)discountPercent=commerce.discountPercent;
+    if(commerce.soldText)soldText=commerce.soldText;
+    if(commerce.brand)brand=commerce.brand;
+    if(commerce.category)category=commerce.category;
   });
 
   const ranked=rankProductImages_(images,id);
-  return {title:title,images:dominantBlibliGallery_(ranked),price:price,currency:currency,description:description,variants:variants};
+  return {
+    title:title,
+    images:dominantBlibliGallery_(ranked),
+    price:price,
+    currency:currency,
+    description:description,
+    variants:variants,
+    originalPrice:originalPrice,
+    discountPercent:discountPercent,
+    soldText:soldText,
+    specifications:specifications,
+    brand:brand,
+    category:category,
+    fetchDiagnostics:(session.diagnostics||[]).slice(-12)
+  };
 }
 function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
 function cleanDescription_(value){
@@ -1464,8 +1816,9 @@ function refreshPriceForProduct_(p){
 
   // Fast path: exact SKU _summary. This avoids searching the full Blibli
   // catalogue and reads the same price object used by the product page.
-  let priceData=fastSummaryPrice_(p);
-  const recoveredPickupPointCode=String(priceData.pickupPointCode||p.pickupPointCode||'').trim();
+  const summaryPriceData=fastSummaryPrice_(p);
+  let priceData=summaryPriceData;
+  const recoveredPickupPointCode=String(summaryPriceData.pickupPointCode||p.pickupPointCode||'').trim();
   if(recoveredPickupPointCode&&!p.pickupPointCode)p=Object.assign({},p,{pickupPointCode:recoveredPickupPointCode});
 
   let priceSource=priceData.price?'summary':'';
@@ -1521,10 +1874,13 @@ function refreshPriceForProduct_(p){
   const price=normalizePrice_(priceData.price||richDom.price);
   const description=bestDescription;
   const variants=bestVariants;
-  const soldText=cleanSoldText_(richDom.soldText||p.soldText||'');
-  const originalPrice=normalizePrice_(richDom.originalPrice||p.originalPrice||'');
-  const discountPercent=normalizeDiscountPercent_(richDom.discountPercent||p.discountPercent||'');
-  const specifications=normalizeSpecifications_((richDom.specifications&&richDom.specifications.length?richDom.specifications:p.specifications)||[]);
+  const soldText=cleanSoldText_(richDom.soldText||summaryPriceData.soldText||p.soldText||'');
+  const originalPrice=normalizePrice_(richDom.originalPrice||summaryPriceData.originalPrice||p.originalPrice||'');
+  const discountPercent=normalizeDiscountPercent_(richDom.discountPercent||summaryPriceData.discountPercent||p.discountPercent||'');
+  const specifications=normalizeSpecifications_((richDom.specifications&&richDom.specifications.length?richDom.specifications:(summaryPriceData.specifications&&summaryPriceData.specifications.length?summaryPriceData.specifications:p.specifications))||[]);
+  const brand=richDom.brand||summaryPriceData.brand||specValue_(specifications,'Merk')||p.brand||'';
+  const category=richDom.category||summaryPriceData.category||specValue_(specifications,'Kategori')||p.category||'';
+  const fetchDiagnostics=(summaryPriceData.fetchDiagnostics||[]).join(' | ').slice(0,1200);
 
   if(!price){
     return Object.assign({},p,{
@@ -1534,8 +1890,11 @@ function refreshPriceForProduct_(p){
       originalPrice:originalPrice,
       discountPercent:discountPercent,
       specifications:specifications,
+      brand:brand,
+      category:category,
       pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
-      lastPriceSource:'empty'
+      lastPriceSource:'empty',
+      lastFetchDiagnostics:fetchDiagnostics
     });
   }
 
@@ -1548,10 +1907,13 @@ function refreshPriceForProduct_(p){
     originalPrice:originalPrice,
     discountPercent:discountPercent,
     specifications:specifications,
+    brand:brand,
+    category:category,
     priceUpdatedAt:new Date().toISOString(),
     source:'live-price',
     pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
-    lastPriceSource:priceSource||'unknown'
+    lastPriceSource:priceSource||'unknown',
+    lastFetchDiagnostics:fetchDiagnostics
   });
 }
 function publicPrice_(id){
@@ -1600,7 +1962,7 @@ function publicPrice_(id){
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','v10 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
+      log_('PRICE_LOOKUP',id,'EMPTY','v12 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · '+(fresh.lastFetchDiagnostics||'semua sumber harga kosong'));
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,originalPrice:fresh.originalPrice||cached.originalPrice||null,discountPercent:fresh.discountPercent||cached.discountPercent||null,soldText:fresh.soldText||cached.soldText||null,description:fresh.description||cached.description||null,specifications:Array.isArray(fresh.specifications)?fresh.specifications:(cached.specifications||[]),variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
