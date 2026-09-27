@@ -43,9 +43,9 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:13,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:14,time:new Date().toISOString()};
     else if(action==='catalog'){
-      try{ensurePriceRefreshTrigger_()}catch(triggerError){}
+      try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
     }
     else if(action==='price') out=publicPrice_(String(p.id||''));
@@ -60,7 +60,7 @@ function doPost(e){
     const p=JSON.parse(e&&e.postData&&e.postData.contents||'{}');
     requireAdmin_(p.key);
     ensureSchema_();
-    try{ensurePriceRefreshTrigger_()}catch(triggerError){}
+    try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
     const action=String(p.action||'');
     if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
     if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
@@ -233,18 +233,20 @@ function priceIsFresh_(p,maxAgeMs){
   const ts=Date.parse(String(p.priceUpdatedAt));
   return isFinite(ts)&&(Date.now()-ts)<maxAgeMs;
 }
-function ensurePriceRefreshTrigger_(){
-  const handler='scheduledRefreshPrices';
-  const exists=ScriptApp.getProjectTriggers().some(function(t){return t.getHandlerFunction()===handler});
-  if(!exists)ScriptApp.newTrigger(handler).timeBased().everyMinutes(10).create();
-}
-function setupPriceRefreshTrigger(){
-  ensureSchema_();
+function disableLegacyPriceRefreshTriggers_(){
+  if(typeof ScriptApp==='undefined')return;
   ScriptApp.getProjectTriggers().forEach(function(t){
     if(t.getHandlerFunction()==='scheduledRefreshPrices')ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('scheduledRefreshPrices').timeBased().everyMinutes(10).create();
-  scheduledRefreshPrices();
+}
+function ensurePriceRefreshTrigger_(){
+  // Live-commerce refresh is intentionally disabled. Blibli rejects cloud
+  // scraping with anti-bot HTTP 403, so only stable catalog fields are served.
+  disableLegacyPriceRefreshTriggers_();
+}
+function setupPriceRefreshTrigger(){
+  disableLegacyPriceRefreshTriggers_();
+  return {ok:true,disabled:true};
 }
 function config_(){
   const values=sheet_(CONFIG_SHEET).getDataRange().getValues(),map={};
@@ -2170,102 +2172,20 @@ function publicPrice_(id){
   if(!/^[A-Za-z0-9-]{3,100}$/.test(id))throw new Error('Product ID tidak valid');
   const cached=readProducts_(PUBLISHED_SHEET).find(function(p){return p.id===id});
   if(!cached)throw new Error('Produk tidak ditemukan');
-
-  // Thirty minutes feels live to a visitor while keeping external requests low.
-  if(priceIsFresh_(cached,30*60*1000)){
-    return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
-  }
-
-  const cache=CacheService.getScriptCache();
-  const throttleKey='price-attempt-'+id;
-  if(cache.get(throttleKey)){
-    return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
-  }
-  cache.put(throttleKey,'1',20);
-
-  const lock=LockService.getScriptLock();
-  if(!lock.tryLock(1500)){
-    return {ok:true,id:id,price:cached.price||null,currency:cached.currency||null,priceUpdatedAt:cached.priceUpdatedAt||null,refreshed:false};
-  }
-
-  try{
-    const fresh=refreshPriceForProduct_(cached);
-    if(normalizePrice_(fresh.price)){
-      upsert_(DRAFT_SHEET,fresh);
-      upsert_(PUBLISHED_SHEET,fresh);
-      SpreadsheetApp.flush();
-      log_('PRICE_LOOKUP',id,'OK',(fresh.lastPriceSource||'unknown')+' · '+fresh.price+' '+(fresh.currency||'IDR'));
-    }else{
-      const metadataChanged=
-        (fresh.pickupPointCode&&fresh.pickupPointCode!==cached.pickupPointCode)||
-        (fresh.description&&fresh.description!==cached.description)||
-        (JSON.stringify(fresh.variants||[])!==JSON.stringify(cached.variants||[]))||
-        (cleanSoldText_(fresh.soldText||'')!==cleanSoldText_(cached.soldText||''))||
-        (normalizePrice_(fresh.originalPrice||'')!==normalizePrice_(cached.originalPrice||''))||
-        (normalizeDiscountPercent_(fresh.discountPercent||'')!==normalizeDiscountPercent_(cached.discountPercent||''))||
-        (JSON.stringify(normalizeSpecifications_(fresh.specifications||[]))!==JSON.stringify(normalizeSpecifications_(cached.specifications||[])));
-      if(metadataChanged){
-        upsert_(DRAFT_SHEET,fresh);
-        upsert_(PUBLISHED_SHEET,fresh);
-        SpreadsheetApp.flush();
-      }
-      // A blocked/empty Blibli response should be retriable on the next visitor,
-      // not frozen for minutes.
-      cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','v13 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · '+(fresh.lastFetchDiagnostics||'semua sumber harga kosong'));
-    }
-    return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,originalPrice:fresh.originalPrice||cached.originalPrice||null,discountPercent:fresh.discountPercent||cached.discountPercent||null,soldText:fresh.soldText||cached.soldText||null,description:fresh.description||cached.description||null,specifications:Array.isArray(fresh.specifications)?fresh.specifications:(cached.specifications||[]),variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
-  }finally{
-    if(lock.hasLock())lock.releaseLock();
-  }
+  return {
+    ok:true,
+    id:id,
+    price:cached.price||null,
+    currency:cached.currency||null,
+    priceUpdatedAt:cached.priceUpdatedAt||null,
+    refreshed:false,
+    liveFetchDisabled:true
+  };
 }
 function scheduledRefreshPrices(){
-  ensureSchema_();
-  const lock=LockService.getScriptLock();
-  if(!lock.tryLock(5000))return;
-
-  try{
-    const products=readProducts_(PUBLISHED_SHEET);
-    if(!products.length)return;
-
-    const props=PropertiesService.getScriptProperties();
-    let cursor=Number(props.getProperty('PRICE_CURSOR')||0);
-    if(!isFinite(cursor)||cursor<0)cursor=0;
-
-    const batchSize=20;
-    let processed=0;
-    let updated=0;
-
-    while(processed<batchSize&&processed<products.length){
-      const index=(cursor+processed)%products.length;
-      const current=products[index];
-      try{
-        const fresh=refreshPriceForProduct_(current);
-        const metadataChanged=
-          (fresh.pickupPointCode&&fresh.pickupPointCode!==current.pickupPointCode)||
-          (fresh.description&&fresh.description!==current.description)||
-          (JSON.stringify(fresh.variants||[])!==JSON.stringify(current.variants||[]))||
-          (cleanSoldText_(fresh.soldText||'')!==cleanSoldText_(current.soldText||''))||
-          (normalizePrice_(fresh.originalPrice||'')!==normalizePrice_(current.originalPrice||''))||
-          (normalizeDiscountPercent_(fresh.discountPercent||'')!==normalizeDiscountPercent_(current.discountPercent||''))||
-          (JSON.stringify(normalizeSpecifications_(fresh.specifications||[]))!==JSON.stringify(normalizeSpecifications_(current.specifications||[])));
-
-        if(normalizePrice_(fresh.price)||metadataChanged){
-          upsert_(DRAFT_SHEET,fresh);
-          upsert_(PUBLISHED_SHEET,fresh);
-          updated++;
-        }
-      }catch(e){}
-      processed++;
-    }
-
-    cursor=(cursor+processed)%products.length;
-    props.setProperty('PRICE_CURSOR',String(cursor));
-    SpreadsheetApp.flush();
-    log_('PRICE_BATCH','ALL','OK',updated+' updated / '+processed+' checked; next='+cursor);
-  }finally{
-    if(lock.hasLock())lock.releaseLock();
-  }
+  // Kept as a no-op so an old installed trigger cannot make blocked Blibli
+  // requests while the next normal API request removes that legacy trigger.
+  return {ok:true,disabled:true};
 }
 function normalizeImage_(s){
   if(!s)return '';
