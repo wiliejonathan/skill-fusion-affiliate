@@ -75,3 +75,49 @@ test('direct Blibli DOM parser extracts visible commerce and product detail fiel
  assert.equal(data.brand,'ACMIC');
  assert.ok(data.specifications.some(x=>x.label==='Stok'&&x.value==='Jaminan stok tersedia'));
 });
+
+
+test('summary commerce extracts price, discount, sold count, variants and specifications',()=>{
+ const ctx=runtime();
+ const payload={
+  name:'ACMIC CFC100',
+  price:{listed:19900,originalPrice:79000,discountPercentage:75},
+  statistics:{sold:2500},
+  uniqueSellingPoint:'ACMIC CFC100 Kabel Data Charger USB Type C dengan fast charging.',
+  brand:{name:'ACMIC'},
+  categories:[{level:1,name:'Aksesoris'},{level:3,name:'Kabel Data'}],
+  attributes:[{
+   name:'Warna',
+   values:[
+    {value:'Red',selected:true,available:true},
+    {value:'TOSCA',available:false}
+   ]
+  }],
+  options:[
+   {selected:true,available:true,attributes:[{name:'Warna',value:'Red'}]},
+   {selected:false,available:false,attributes:[{name:'Warna',value:'TOSCA'}]}
+  ]
+ };
+ const data=ctx.extractSummaryCommerce_(payload);
+ assert.equal(data.price,'19900');
+ assert.equal(data.originalPrice,'79000');
+ assert.equal(data.discountPercent,'75%');
+ assert.equal(data.soldText,'Terjual 2,5 rb');
+ assert.equal(data.brand,'ACMIC');
+ assert.equal(data.category,'Kabel Data');
+ assert.ok(data.specifications.some(x=>x.label==='Merk'&&x.value==='ACMIC'));
+ assert.ok(data.specifications.some(x=>x.label==='Kategori'&&x.value==='Kabel Data'));
+ const warna=data.variants.find(x=>x.name==='Warna');
+ assert.ok(warna);
+ assert.equal(warna.selected,'Red');
+ assert.equal(warna.values.find(x=>x.name==='Red').selected,true);
+ assert.equal(warna.values.find(x=>x.name==='TOSCA').outOfStock,true);
+});
+
+test('session fetch helpers stay inert in the Node Apps Script runtime',()=>{
+ const ctx=runtime();
+ const session=ctx.blibliSession_(product.canonicalUrl);
+ assert.deepEqual(Object.keys(session.cookies),[]);
+ assert.equal(ctx.fetchJsonSession_('https://www.blibli.com/backend/test',product.canonicalUrl,session),null);
+ assert.equal(ctx.fetchTextSession_(product.canonicalUrl,session),'');
+});
