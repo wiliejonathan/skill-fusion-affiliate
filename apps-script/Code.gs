@@ -3,7 +3,7 @@ const DRAFT_SHEET = 'Draft';
 const PUBLISHED_SHEET = 'Published';
 const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
-const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt','pickupPointCode','variants_json'];
+const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt','pickupPointCode','variants_json','soldText','originalPrice','discountPercent','specifications_json'];
 
 const PRODUCT_FETCH_UAS = [
   'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)',
@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:10,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:11,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -85,7 +85,7 @@ function validBlibliUrl_(url){
   if(!/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value))throw new Error('URL harus HTTPS Blibli');
   return value;
 }
-function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,description:p.description||null,priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null,variants:Array.isArray(p.variants)?p.variants:[]}}
+function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,originalPrice:p.originalPrice||null,discountPercent:p.discountPercent||null,soldText:p.soldText||null,description:p.description||null,specifications:Array.isArray(p.specifications)?p.specifications:[],priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null,variants:Array.isArray(p.variants)?p.variants:[]}}
 function resolveProduct_(url){
   validBlibliUrl_(url);
 
@@ -110,7 +110,11 @@ function resolveProduct_(url){
     currency:'',
     description:'',
     pickupPointCode:'',
-    variants:[]
+    variants:[],
+    soldText:'',
+    originalPrice:'',
+    discountPercent:'',
+    specifications:[]
   };
 
   const p=reloadFromBlibli_(seed);
@@ -138,7 +142,7 @@ function validateProduct_(p){
   validBlibliUrl_(p.affiliateUrl);
   if(p.canonicalUrl){validBlibliUrl_(p.canonicalUrl);if(productId_(p.canonicalUrl)!==id)throw new Error('Product ID tidak cocok dengan URL')}
   if(!Array.isArray(p.images)||p.images.some(x=>typeof x!=='string'||!/^https:\/\//i.test(x)))throw new Error('Foto produk tidak valid');
-  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim(),description:cleanDescription_(p.description||''),variants:normalizeVariants_(p.variants||[])});
+  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim(),description:cleanDescription_(p.description||''),variants:normalizeVariants_(p.variants||[]),soldText:cleanSoldText_(p.soldText||''),originalPrice:normalizePrice_(p.originalPrice||''),discountPercent:normalizeDiscountPercent_(p.discountPercent||''),specifications:normalizeSpecifications_(p.specifications||[])});
 }
 function savePublish_(request){
   const input=request.product?[request.product]:request.products;
@@ -185,6 +189,10 @@ function savePublish_(request){
     if(current&&(!Array.isArray(p.variants)||!p.variants.length)&&Array.isArray(current.variants)&&current.variants.length){
       p.variants=current.variants;
     }
+    if(current&&!cleanSoldText_(p.soldText||'')&&cleanSoldText_(current.soldText||''))p.soldText=current.soldText;
+    if(current&&!normalizePrice_(p.originalPrice||'')&&normalizePrice_(current.originalPrice||''))p.originalPrice=current.originalPrice;
+    if(current&&!normalizeDiscountPercent_(p.discountPercent||'')&&normalizeDiscountPercent_(current.discountPercent||''))p.discountPercent=current.discountPercent;
+    if(current&&(!Array.isArray(p.specifications)||!p.specifications.length)&&Array.isArray(current.specifications)&&current.specifications.length)p.specifications=current.specifications;
 
     p.sequence=current?current.sequence:++sequence;
   });
@@ -246,14 +254,15 @@ function requireAdmin_(key){const expected=config_().ADMIN_KEY;if(!expected||Str
 function log_(action,id,status,message){sheet_(LOG_SHEET).appendRow([new Date(),action,id||'',status,message||''])}
 
 function rowToProduct_(r){
-  let images=[],features=[],variants=[];
+  let images=[],features=[],variants=[],specifications=[];
   try{images=JSON.parse(r[6]||'[]')}catch(e){}
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
   try{variants=JSON.parse(r[18]||'[]')}catch(e){}
-  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||''),variants:Array.isArray(variants)?variants:[]};
+  try{specifications=JSON.parse(r[22]||'[]')}catch(e){}
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||''),variants:Array.isArray(variants)?variants:[],soldText:String(r[19]||''),originalPrice:String(r[20]||''),discountPercent:String(r[21]||''),specifications:Array.isArray(specifications)?specifications:[]};
 }
 function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
-function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||'',p.pickupPointCode||'',JSON.stringify(p.variants||[])].map(safeCell_)}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||'',p.pickupPointCode||'',JSON.stringify(p.variants||[]),p.soldText||'',p.originalPrice||'',p.discountPercent||'',JSON.stringify(p.specifications||[])].map(safeCell_)}
 function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
 function findRow_(name,id){const s=sheet_(name);if(s.getLastRow()<2)return -1;const v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
 function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
@@ -300,6 +309,7 @@ function reloadFromBlibli_(p){
   const pricingUrl=productId_(resolved.finalUrl||'')?(resolved.finalUrl||canonical):canonical;
   const pickupPointCode=pickupPointCode_(pricingUrl)||p.pickupPointCode||'';
   const html=fetchText_(pricingUrl);
+  const domData=extractBlibliDomData_(html);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
 
   // Blibli's visible gallery is rendered as heroThumbnails. Read that exact DOM
@@ -326,7 +336,7 @@ function reloadFromBlibli_(p){
     const official=officialFallbackImages_(id);
     if(official.length>finalGallery.length)finalGallery=official;
   }
-  const htmlPrice=extractHtmlPrice_(html);
+  const htmlPrice=domData.price||extractHtmlPrice_(html);
   const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
   const seoData=seoProductPageData_(Object.assign({},p,{id:id,name:title,canonicalUrl:canonical,pickupPointCode:pickupPointCode}));
   const searchPrice=(!summary.price&&!htmlPrice&&!seoData.price)?searchPriceData_(id,title,canonical):{price:'',currency:''};
@@ -338,14 +348,21 @@ function reloadFromBlibli_(p){
     /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i
   ]);
-  const description=cleanDescription_(summary.description||seoData.description||htmlDescription||p.description||'');
+  const description=cleanDescription_(domData.description||summary.description||seoData.description||htmlDescription||p.description||'');
   const variants=normalizeVariants_(
+    (domData.variants&&domData.variants.length?domData.variants:null)||
     (summary.variants&&summary.variants.length?summary.variants:null)||
     (seoData.variants&&seoData.variants.length?seoData.variants:null)||
     p.variants||[]
   );
+  const specifications=normalizeSpecifications_((domData.specifications&&domData.specifications.length?domData.specifications:p.specifications)||[]);
+  const soldText=cleanSoldText_(domData.soldText||p.soldText||'');
+  const originalPrice=normalizePrice_(domData.originalPrice||p.originalPrice||'');
+  const discountPercent=normalizeDiscountPercent_(domData.discountPercent||p.discountPercent||'');
+  const brand=domData.brand||specValue_(specifications,'Merk')||p.brand||inferBrand_(title,id);
+  const category=domData.category||specValue_(specifications,'Kategori')||p.category||'';
   if(!isUsableProductTitle_(title))title=p.name;
-  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:brand,category:category,features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,originalPrice:originalPrice,discountPercent:discountPercent,soldText:soldText,description:description,specifications:specifications,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
 function resolveUrl_(url){
   let current=url,html='';
@@ -819,35 +836,233 @@ function extractSummaryDescription_(value){
   });
   return candidates[0].text;
 }
+
+function cleanInlineText_(value){
+  return decodeHtml_(value||'')
+    .replace(/<!---->/g,' ')
+    .replace(/<script[\s\S]*?<\/script>/ig,' ')
+    .replace(/<style[\s\S]*?<\/style>/ig,' ')
+    .replace(/<br\s*\/?>/ig,' ')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/ig,' ')
+    .replace(/&#39;|&apos;/ig,"'")
+    .replace(/&quot;/ig,'"')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function cleanSoldText_(value){
+  const text=cleanInlineText_(value);
+  if(!text)return '';
+  if(/^terjual\b/i.test(text))return text.slice(0,80);
+  if(/^[0-9][0-9.,]*\s*(?:rb|ribu|jt|juta)?$/i.test(text))return 'Terjual '+text;
+  return text.slice(0,80);
+}
+function normalizeDiscountPercent_(value){
+  const m=String(value||'').match(/([0-9]{1,3})\s*%?/);
+  if(!m)return '';
+  const n=Number(m[1]);
+  return isFinite(n)&&n>=0&&n<=100?String(n)+'%':'';
+}
+function normalizeSpecifications_(value){
+  const out=[],seen={};
+  function add(label,val){
+    const l=cleanInlineText_(label).replace(/:\s*$/,'').trim();
+    const v=cleanInlineText_(val);
+    if(!l||!v||l.length>100||v.length>1000)return;
+    const key=l.toLowerCase();
+    if(seen[key])return;
+    seen[key]=true;
+    out.push({label:l,value:v});
+  }
+  if(Array.isArray(value)){
+    value.forEach(function(row){
+      if(!row)return;
+      if(typeof row==='object')add(row.label||row.name||row.key,row.value||row.text||row.val);
+    });
+  }else if(value&&typeof value==='object'){
+    Object.keys(value).forEach(function(key){add(key,value[key])});
+  }
+  return out.slice(0,80);
+}
+function specValue_(specifications,label){
+  const wanted=String(label||'').toLowerCase();
+  const row=(specifications||[]).find(function(x){return String(x&&x.label||'').toLowerCase()===wanted});
+  return row?String(row.value||''):'';
+}
+function sectionBetween_(html,startNeedles,stopNeedles){
+  const value=String(html||'');
+  let start=-1;
+  (startNeedles||[]).some(function(needle){
+    const i=value.indexOf(needle);
+    if(i>=0){start=i;return true}
+    return false;
+  });
+  if(start<0)return '';
+  const tagStart=value.lastIndexOf('<',start);
+  if(tagStart>=0)start=tagStart;
+  let end=value.length;
+  (stopNeedles||[]).forEach(function(needle){
+    const i=value.indexOf(needle,start+1);
+    if(i>=0&&i<end){
+      const tag=value.lastIndexOf('<',i);
+      end=tag>=start?tag:i;
+    }
+  });
+  return value.slice(start,end);
+}
+function extractBlibliDomData_(html){
+  const value=decodeHtml_(html||'');
+  const data={price:'',originalPrice:'',discountPercent:'',soldText:'',description:'',variants:[],specifications:[],brand:'',category:''};
+
+  data.price=normalizePrice_(pick_(value,[
+    /data-testid=["']priceComponentOffered["'][^>]*>\s*Rp\s*([0-9][0-9.,]*)/i,
+    /class=["'][^"']*product-price__after[^"']*["'][^>]*>\s*Rp\s*([0-9][0-9.,]*)/i
+  ]));
+  data.originalPrice=normalizePrice_(pick_(value,[
+    /class=["'][^"']*product-price__before[^"']*["'][^>]*>\s*Rp\s*([0-9][0-9.,]*)/i
+  ]));
+  data.discountPercent=normalizeDiscountPercent_(pick_(value,[
+    /class=["'][^"']*blu-badge[^"']*b-red[^"']*["'][^>]*>[\s\S]{0,260}?<span[^>]*>\s*([0-9]{1,3})\s*%/i
+  ]));
+  data.soldText=cleanSoldText_(pick_(value,[
+    /class=["'][^"']*sold-seen-label__label[^"']*["'][^>]*>\s*([^<]{1,80})\s*</i
+  ]));
+
+  const descriptionBlock=sectionBetween_(value,['product-description-section'],['product-specification','data-testid="variantSection"','pdp__variant']);
+  if(descriptionBlock){
+    data.description=cleanDescription_(descriptionBlock)
+      .replace(/^Deskripsi\s*/i,'')
+      .trim();
+  }
+
+  const variantBlock=sectionBetween_(value,['data-testid="variantSection"','pdp__variant'],['product-description-section','product-specification']);
+  if(variantBlock){
+    let groupName=cleanInlineText_(pick_(variantBlock,[
+      /class=["'][^"']*\blabel\b[^"']*["'][^>]*>\s*([^<:]{1,80})\s*:/i
+    ]))||'Varian';
+    const selectedText=cleanInlineText_(pick_(variantBlock,[
+      /class=["'][^"']*\blabel\b[^"']*["'][^>]*>[\s\S]{0,120}?<\/span>\s*<span[^>]*>\s*([^<]{1,100})\s*<\/span>/i
+    ]));
+    const options=[];
+    const chipRe=/<div[^>]+class=["']([^"']*product-chip[^"']*product-variant__item[^"']*)["'][^>]+data-testid=["']colorVariantImage-\d+["'][^>]*>[\s\S]*?<img([^>]*)>[\s\S]*?<div[^>]+class=["'][^"']*product-chip__desc[^"']*["'][^>]*>([^<]{1,100})<\/div>/ig;
+    let chip;
+    while((chip=chipRe.exec(variantBlock))){
+      const classes=String(chip[1]||'');
+      const attrs=String(chip[2]||'');
+      const desc=cleanInlineText_(chip[3]);
+      const alt=cleanInlineText_(pick_(attrs,[/\balt=["']([^"']+)["']/i]));
+      const src=normalizeImage_(pick_(attrs,[/\b(?:data-src|src)=["']([^"']+)["']/i]));
+      const name=desc||alt;
+      if(name)options.push({name:name,image:src,selected:/\bd-selected\b/i.test(classes),outOfStock:/\bd-oos\b/i.test(classes)});
+    }
+    if(options.length){
+      const selectedOption=options.find(function(x){return x.selected});
+      data.variants.push({name:groupName,selected:selectedOption?selectedOption.name:selectedText,values:options});
+    }else if(selectedText){
+      data.variants.push({name:groupName,selected:selectedText,values:[{name:selectedText,selected:true,outOfStock:false,image:''}]});
+    }
+
+    const code=cleanInlineText_(pick_(variantBlock,[
+      /class=["'][^"']*\blabel\b[^"']*["'][^>]*>\s*Kode Produk:\s*<\/span>[\s\S]{0,900}?<abbr[^>]*>([^<]{1,100})<\/abbr>/i
+    ]));
+    if(code)data.variants.push({name:'Kode Produk',selected:code,values:[{name:code,selected:true,outOfStock:false,image:''}]});
+  }
+
+  const specBlock=sectionBetween_(value,['product-specification'],['product-description-section','data-testid="review','recommendation','similar-product']);
+  if(specBlock){
+    const rows=[];
+    const rowRe=/<tr[^>]*>([\s\S]*?)<\/tr>/ig;
+    let row;
+    while((row=rowRe.exec(specBlock))){
+      const body=row[1];
+      const label=cleanInlineText_(pick_(body,[
+        /class=["'][^"']*\blabel\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i
+      ]));
+      let val=cleanInlineText_(pick_(body,[
+        /class=["'][^"']*\bvalue\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i,
+        /class=["'][^"']*more-specs__label[^"']*["'][^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i
+      ]));
+      if(label&&val)rows.push({label:label,value:val});
+    }
+    if(/Jaminan stok tersedia/i.test(cleanInlineText_(specBlock)))rows.push({label:'Stok',value:'Jaminan stok tersedia'});
+    data.specifications=normalizeSpecifications_(rows);
+    data.category=specValue_(data.specifications,'Kategori');
+    data.brand=specValue_(data.specifications,'Merk');
+  }
+
+  return data;
+}
+
 function normalizeVariants_(value){
   const groups=[];
   const seen={};
 
-  function add(name,values){
-    const label=String(name||'Varian').replace(/\s+/g,' ').trim();
-    const list=unique_((values||[]).map(function(v){
-      if(v&&typeof v==='object')return String(v.name||v.label||v.value||v.text||'').trim();
-      return String(v||'').trim();
-    }).filter(function(v){
-      return v&&v.length<=80&&!/^(pilih|select|varian|variant|warna|color)$/i.test(v);
-    }));
+  function option(v){
+    if(v===null||v===undefined)return null;
+    if(typeof v==='string'||typeof v==='number'){
+      const name=String(v).replace(/\s+/g,' ').trim();
+      return name?{name:name,image:'',selected:false,outOfStock:false}:null;
+    }
+    if(typeof v!=='object')return null;
+    const name=String(v.name||v.label||v.value||v.text||v.displayName||'').replace(/\s+/g,' ').trim();
+    if(!name)return null;
+    return {
+      name:name,
+      image:normalizeImage_(v.image||v.imageUrl||v.thumbnail||v.thumbnailUrl||''),
+      selected:!!(v.selected||v.isSelected),
+      outOfStock:!!(v.outOfStock||v.oos||v.disabled||v.available===false)
+    };
+  }
 
+  function add(name,values,selected){
+    const label=String(name||'Varian').replace(/\s+/g,' ').trim();
+    const list=[];
+    const optionSeen={};
+    (values||[]).forEach(function(v){
+      const o=option(v);
+      if(!o||o.name.length>80||/^(pilih|select|varian|variant|warna|color)$/i.test(o.name))return;
+      const key=o.name.toLowerCase();
+      if(optionSeen[key]){
+        const existing=list.find(function(x){return x.name.toLowerCase()===key});
+        if(existing){
+          existing.selected=existing.selected||o.selected;
+          existing.outOfStock=existing.outOfStock&&o.outOfStock;
+          if(!existing.image&&o.image)existing.image=o.image;
+        }
+        return;
+      }
+      optionSeen[key]=true;
+      list.push(o);
+    });
     if(!list.length)return;
+
     const key=label.toLowerCase();
+    const selectedName=String(selected||'').trim()||(list.find(function(x){return x.selected})||{}).name||'';
     if(!seen[key]){
       seen[key]=true;
-      groups.push({name:label,values:list.slice(0,30)});
+      groups.push({name:label,selected:selectedName,values:list.slice(0,30)});
     }else{
       const existing=groups.find(function(g){return g.name.toLowerCase()===key});
-      if(existing)existing.values=unique_(existing.values.concat(list)).slice(0,30);
+      if(existing){
+        const merged=existing.values.concat(list);
+        const dedup=[];
+        const keys={};
+        merged.forEach(function(o){
+          const k=o.name.toLowerCase();
+          if(keys[k])return;
+          keys[k]=true;dedup.push(o);
+        });
+        existing.values=dedup.slice(0,30);
+        if(!existing.selected&&selectedName)existing.selected=selectedName;
+      }
     }
   }
 
   if(Array.isArray(value)){
     value.forEach(function(group){
       if(!group)return;
-      if(typeof group==='string')add('Varian',[group]);
-      else if(typeof group==='object')add(group.name||group.label||group.type||group.attributeName||'Varian',group.values||group.options||group.items||group.variants||[]);
+      if(typeof group==='string'||typeof group==='number')add('Varian',[group],'');
+      else if(typeof group==='object')add(group.name||group.label||group.type||group.attributeName||'Varian',group.values||group.options||group.items||group.variants||[],group.selected||group.selectedValue||'');
     });
   }
 
@@ -1295,14 +1510,29 @@ function refreshPriceForProduct_(p){
     if(priceData.price)priceSource='pdp';
   }
 
-  const price=normalizePrice_(priceData.price);
+  let richDom={price:'',originalPrice:'',discountPercent:'',soldText:'',description:'',variants:[],specifications:[]};
+  if(!cleanSoldText_(p.soldText||'')||!normalizeSpecifications_(p.specifications||[]).length||!bestDescription||!bestVariants.length){
+    const richHtml=fetchSeoText_(p.canonicalUrl||p.affiliateUrl,p.id);
+    if(richHtml)richDom=extractBlibliDomData_(richHtml);
+  }
+  if(richDom.description&&richDom.description.length>bestDescription.length)bestDescription=cleanDescription_(richDom.description);
+  if(richDom.variants&&richDom.variants.length>bestVariants.length)bestVariants=normalizeVariants_(richDom.variants);
+  const price=normalizePrice_(priceData.price||richDom.price);
   const description=bestDescription;
   const variants=bestVariants;
+  const soldText=cleanSoldText_(richDom.soldText||p.soldText||'');
+  const originalPrice=normalizePrice_(richDom.originalPrice||p.originalPrice||'');
+  const discountPercent=normalizeDiscountPercent_(richDom.discountPercent||p.discountPercent||'');
+  const specifications=normalizeSpecifications_((richDom.specifications&&richDom.specifications.length?richDom.specifications:p.specifications)||[]);
 
   if(!price){
     return Object.assign({},p,{
       description:description||p.description||'',
       variants:variants,
+      soldText:soldText,
+      originalPrice:originalPrice,
+      discountPercent:discountPercent,
+      specifications:specifications,
       pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
       lastPriceSource:'empty'
     });
@@ -1313,6 +1543,10 @@ function refreshPriceForProduct_(p){
     currency:String(priceData.currency||p.currency||'IDR').toUpperCase(),
     description:description||p.description||'',
     variants:variants,
+    soldText:soldText,
+    originalPrice:originalPrice,
+    discountPercent:discountPercent,
+    specifications:specifications,
     priceUpdatedAt:new Date().toISOString(),
     source:'live-price',
     pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
@@ -1352,7 +1586,11 @@ function publicPrice_(id){
       const metadataChanged=
         (fresh.pickupPointCode&&fresh.pickupPointCode!==cached.pickupPointCode)||
         (fresh.description&&fresh.description!==cached.description)||
-        (JSON.stringify(fresh.variants||[])!==JSON.stringify(cached.variants||[]));
+        (JSON.stringify(fresh.variants||[])!==JSON.stringify(cached.variants||[]))||
+        (cleanSoldText_(fresh.soldText||'')!==cleanSoldText_(cached.soldText||''))||
+        (normalizePrice_(fresh.originalPrice||'')!==normalizePrice_(cached.originalPrice||''))||
+        (normalizeDiscountPercent_(fresh.discountPercent||'')!==normalizeDiscountPercent_(cached.discountPercent||''))||
+        (JSON.stringify(normalizeSpecifications_(fresh.specifications||[]))!==JSON.stringify(normalizeSpecifications_(cached.specifications||[])));
       if(metadataChanged){
         upsert_(DRAFT_SHEET,fresh);
         upsert_(PUBLISHED_SHEET,fresh);
@@ -1363,7 +1601,7 @@ function publicPrice_(id){
       cache.remove(throttleKey);
       log_('PRICE_LOOKUP',id,'EMPTY','v10 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
     }
-    return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,description:fresh.description||cached.description||null,variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
+    return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,originalPrice:fresh.originalPrice||cached.originalPrice||null,discountPercent:fresh.discountPercent||cached.discountPercent||null,soldText:fresh.soldText||cached.soldText||null,description:fresh.description||cached.description||null,specifications:Array.isArray(fresh.specifications)?fresh.specifications:(cached.specifications||[]),variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
     if(lock.hasLock())lock.releaseLock();
   }
@@ -1393,7 +1631,11 @@ function scheduledRefreshPrices(){
         const metadataChanged=
           (fresh.pickupPointCode&&fresh.pickupPointCode!==current.pickupPointCode)||
           (fresh.description&&fresh.description!==current.description)||
-          (JSON.stringify(fresh.variants||[])!==JSON.stringify(current.variants||[]));
+          (JSON.stringify(fresh.variants||[])!==JSON.stringify(current.variants||[]))||
+          (cleanSoldText_(fresh.soldText||'')!==cleanSoldText_(current.soldText||''))||
+          (normalizePrice_(fresh.originalPrice||'')!==normalizePrice_(current.originalPrice||''))||
+          (normalizeDiscountPercent_(fresh.discountPercent||'')!==normalizeDiscountPercent_(current.discountPercent||''))||
+          (JSON.stringify(normalizeSpecifications_(fresh.specifications||[]))!==JSON.stringify(normalizeSpecifications_(current.specifications||[])));
 
         if(normalizePrice_(fresh.price)||metadataChanged){
           upsert_(DRAFT_SHEET,fresh);
