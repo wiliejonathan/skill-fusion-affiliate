@@ -19,7 +19,69 @@ export type Product={
   variants?:ProductVariant[];
 };
 
-export const categories=["Semua","Charging & Cable"];
+export const PRODUCT_CATEGORY_ORDER=[
+  "Power Bank",
+  "Charging & Cable",
+  "Charger & Adapter",
+  "Smartwatch & Wearable",
+  "Audio",
+  "Smartphone & Tablet",
+  "Computer & Peripheral",
+  "Smart Home",
+  "Networking & Storage",
+  "Tech Accessories",
+  "Other Tech"
+] as const;
+
+export function inferProductCategory(product:Pick<Product,"name"|"category"|"features">){
+  const name=String(product?.name||"").toLowerCase();
+  const features=Array.isArray(product?.features)?product.features.join(" ").toLowerCase():"";
+  const stored=String(product?.category||"").trim();
+  const storedLow=stored.toLowerCase();
+  const text=(name+" "+features).replace(/[_/]+/g," ").replace(/\s+/g," ").trim();
+
+  // Put the most specific product families first. Existing database rows were
+  // historically stored as "Charging & Cable", so title/features are the
+  // authoritative signal for classification.
+  if(/\b(power\s*bank|powerbank|battery\s*pack|portable\s+charger)\b/i.test(text)) return "Power Bank";
+  if(/\b(smart\s*watch|smartwatch|fitness\s*(?:band|tracker)|forerunner|apple\s*watch|galaxy\s*watch|amazfit|smart\s*band|garmin\s+(?:venu|vivo|instinct|fenix|epix))\b/i.test(text)) return "Smartwatch & Wearable";
+  if(/\b(earbuds?|earphones?|headphones?|headsets?|tws|speaker|soundbar|microphone|audio)\b/i.test(text)) return "Audio";
+  if(/\b(smartphone|handphone|mobile\s+phone|iphone\b|ipad\b|tablet\b|galaxy\s+[asz]\d|redmi\s+note|poco\s+[a-z0-9])\b/i.test(text)) return "Smartphone & Tablet";
+  if(/\b(smart\s*home|smart\s*plug|smart\s*bulb|ip\s*camera|cctv|doorbell|robot\s*vacuum|vacuum\s*cleaner|air\s*purifier|smart\s*sensor)\b/i.test(text)) return "Smart Home";
+  if(/\b(router|wi-?fi|modem|mesh\s*wifi|ethernet|network\s*switch|ssd|hdd|hard\s*drive|flash\s*drive|usb\s*drive|micro\s*sd|memory\s*card|nas\b)\b/i.test(text)) return "Networking & Storage";
+  if(/\b(keyboard|mouse|monitor|laptop|notebook|webcam|gamepad|controller|usb\s*hub|type\s*c\s*hub|docking\s*station)\b/i.test(text)) return "Computer & Peripheral";
+  if(/\b(kabel|cable|braided\s+line|data\s+charger|data\s+cable|lightning\s+cable|usb\s*[ac]\s*to|usb-?[ac]\s*to|type\s*-?c\s*to|c\s*to\s*c)\b/i.test(text)) return "Charging & Cable";
+  if(/\b(gan\s*charger|wall\s*charger|travel\s*charger|wireless\s*charger|charging\s*station|charging\s*dock|car\s*charger|power\s*adapter|power\s*adaptor|adapter|adaptor|kepala\s*charger)\b/i.test(text)) return "Charger & Adapter";
+  if(/\b(case|casing|cover|holder|stand|mount|screen\s*protector|tempered\s*glass|strap|stylus|sleeve|pouch)\b/i.test(text)) return "Tech Accessories";
+
+  // Respect useful category metadata from Blibli, but normalize it into the
+  // marketplace's compact product classes.
+  if(/power\s*bank/i.test(storedLow)) return "Power Bank";
+  if(/watch|wearable|fitness/i.test(storedLow)) return "Smartwatch & Wearable";
+  if(/audio|earphone|headphone|speaker/i.test(storedLow)) return "Audio";
+  if(/smartphone|handphone|tablet/i.test(storedLow)) return "Smartphone & Tablet";
+  if(/smart\s*home|home\s*appliance/i.test(storedLow)) return "Smart Home";
+  if(/network|storage|router|ssd|memory/i.test(storedLow)) return "Networking & Storage";
+  if(/computer|peripheral|keyboard|mouse|laptop/i.test(storedLow)) return "Computer & Peripheral";
+  if(/charger|adapter|adaptor/i.test(storedLow)&&!/cable|kabel/i.test(storedLow)) return "Charger & Adapter";
+  if(/cable|kabel/i.test(storedLow)) return "Charging & Cable";
+  if(/accessor/i.test(storedLow)) return "Tech Accessories";
+
+  return "Other Tech";
+}
+
+export function getAvailableProductCategories(items:Product[]){
+  const found=new Set(items.map(inferProductCategory));
+  const ordered=PRODUCT_CATEGORY_ORDER.filter(item=>found.has(item));
+  const extras=Array.from(found)
+    .filter(item=>!PRODUCT_CATEGORY_ORDER.includes(item as (typeof PRODUCT_CATEGORY_ORDER)[number]))
+    .sort((a,b)=>a.localeCompare(b));
+  return ["Semua",...ordered,...extras];
+}
+
+// Kept for compatibility with older components; Marketplace builds its actual
+// filter options dynamically from the live catalog.
+export const categories=["Semua",...PRODUCT_CATEGORY_ORDER];
 
 export const products:Product[]=[
   {
