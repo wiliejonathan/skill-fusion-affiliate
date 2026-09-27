@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "build:pages": "node scripts/build-pages.mjs",
-    "test:backend": "node --test tests/backend.test.cjs"
+    "test:backend": "node --test tests/*.test.cjs"
   },
   "dependencies": {
     "next": "latest",

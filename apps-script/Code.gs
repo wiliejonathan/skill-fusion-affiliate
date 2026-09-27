@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:9,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:10,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -421,9 +421,29 @@ function resolveUrl_(url){
   const candidate=productId_(canonical||'')?canonical:current;
   return {finalUrl:current,canonical:canonicalProductUrl_(candidate||url)};
 }
+// Apps Script V8 has no browser URL or URLSearchParams globals. This helper
+// supports the absolute HTTP(S) URLs and query operations used by this script.
+function parseHttpUrl_(value){
+  const match=String(value||'').trim().match(/^(https?):\/\/([^\s\/?#]+)(\/[^\s?#]*)?(\?[^\s#]*)?(#[^\s]*)?$/i);
+  if(!match)throw new Error('URL HTTP(S) tidak valid');
+  const url={origin:match[1].toLowerCase()+'://'+match[2],pathname:match[3]||'/',search:match[4]||'',hash:match[5]||''};
+  function decode(value){try{return decodeURIComponent(value.replace(/\+/g,' '))}catch(e){return value}}
+  function entries(){return url.search.replace(/^\?/,'').split('&').filter(Boolean).map(function(part){
+    const i=part.indexOf('=');
+    return [decode(i<0?part:part.slice(0,i)),decode(i<0?'':part.slice(i+1))];
+  })}
+  function write(pairs){const query=pairs.map(function(pair){return encodeURIComponent(pair[0])+'='+encodeURIComponent(pair[1])}).join('&');url.search=query?'?'+query:''}
+  url.searchParams={
+    get:function(key){const pair=entries().find(function(pair){return pair[0]===key});return pair?pair[1]:null},
+    set:function(key,value){const pairs=entries().filter(function(pair){return pair[0]!==key});pairs.push([key,String(value)]);write(pairs)},
+    delete:function(key){write(entries().filter(function(pair){return pair[0]!==key}))}
+  };
+  url.toString=function(){return url.origin+url.pathname+url.search+url.hash};
+  return url;
+}
 function pickupPointCode_(value){
   try{
-    const u=new URL(String(value||''));
+    const u=parseHttpUrl_(String(value||''));
     return String(u.searchParams.get('pickupPointCode')||'').trim();
   }catch(e){
     const m=String(value||'').match(/[?&]pickupPointCode=([^&#]+)/i);
@@ -592,7 +612,7 @@ function selectedVariantPagePrice_(p){
   const baseId=id.replace(/-\d{5}$/,'');
   let page=String(p.canonicalUrl||p.affiliateUrl||'');
   try{
-    const u=new URL(page);
+    const u=parseHttpUrl_(page);
     if(/\/is--[^/?#]+$/i.test(u.pathname)){
       u.pathname=u.pathname.replace(/\/is--[^/?#]+$/i,'/ps--'+baseId);
     }else if(!/\/ps--[^/?#]+$/i.test(u.pathname)){
@@ -681,7 +701,7 @@ function fastSummaryPrice_(p){
 function summaryData_(canonical,id,contextUrl){
   let pickupPointCode='';
   try{
-    pickupPointCode=new URL(String(contextUrl||canonical)).searchParams.get('pickupPointCode')||'';
+    pickupPointCode=parseHttpUrl_(String(contextUrl||canonical)).searchParams.get('pickupPointCode')||'';
   }catch(e){}
 
   const itemSuffix=pickupPointCode?'?pickupPointCode='+encodeURIComponent(pickupPointCode):'';
@@ -1003,11 +1023,12 @@ function extractSeoVariants_(html){
   return normalizeVariants_(groups);
 }
 function ampProductPageData_(p){
+  const id=String(p&&p.id||'').trim();
   let page=String(p&&p.canonicalUrl||'');
   if(!page)return {price:'',currency:'',description:'',variants:[]};
 
   try{
-    const u=new URL(page);
+    const u=parseHttpUrl_(page);
     if(!/\/p\//i.test(u.pathname))return {price:'',currency:'',description:'',variants:[]};
     if(!/^\/amp\//i.test(u.pathname))u.pathname='/amp'+u.pathname;
     u.search='';
@@ -1037,7 +1058,7 @@ function seoProductPageData_(p){
   const baseId=id.replace(/-\d{5}$/,'');
   let page=String(p.canonicalUrl||'');
   try{
-    const u=new URL(page);
+    const u=parseHttpUrl_(page);
     if(/\/is--[^/?#]+$/i.test(u.pathname)){
       u.pathname=u.pathname.replace(/\/is--[^/?#]+$/i,'/ps--'+baseId);
     }else if(!/\/ps--[^/?#]+$/i.test(u.pathname)){
@@ -1340,7 +1361,7 @@ function publicPrice_(id){
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','v9 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
+      log_('PRICE_LOOKUP',id,'EMPTY','v10 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,description:fresh.description||cached.description||null,variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
@@ -1403,7 +1424,7 @@ function normalizeImage_(s){
   // heroThumbnails uses ?w=112. Once promoted to /full/, drop transform params
   // so Admin and Client receive the original full-resolution product image.
   try{
-    const u=new URL(v);
+    const u=parseHttpUrl_(v);
     ['w','h','width','height','quality','q','resize','format'].forEach(function(key){u.searchParams.delete(key)});
     v=u.toString();
   }catch(e){}
@@ -1554,7 +1575,7 @@ function officialFallbackImages_(id){
 
 function canonicalProductUrl_(value){
   try{
-    const u=new URL(String(value||''));
+    const u=parseHttpUrl_(String(value||''));
     return (u.origin+u.pathname).replace(/\/$/,'');
   }catch(e){
     return String(value||'').split('?')[0].replace(/\/$/,'');
@@ -1562,7 +1583,7 @@ function canonicalProductUrl_(value){
 }
 function titleFromUrl_(value){
   try{
-    const u=new URL(String(value||''));
+    const u=parseHttpUrl_(String(value||''));
     const marker='/is--';
     const i=u.pathname.indexOf(marker);
     const before=i>=0?u.pathname.slice(0,i):u.pathname;
