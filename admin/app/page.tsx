@@ -8,7 +8,7 @@ import {checkImports,type CatalogIdentity} from "@/lib/dedupe";
 
 type ResolvedProduct={
   inputUrl:string; finalUrl:string; canonicalUrl:string|null; canonicalProductId:string|null;
-  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; description?:string|null; priceUpdatedAt?:string|null; pickupPointCode?:string|null; ok:boolean; message?:string;
+  title:string|null; image:string|null; images:string[]; price:string|null; currency:string|null; description?:string|null; priceUpdatedAt?:string|null; pickupPointCode?:string|null; variants?:Array<{name:string;values:string[]}>; ok:boolean; message?:string;
 };
 
 type DbProduct={
@@ -28,6 +28,7 @@ type DbProduct={
   description?:string|null;
   priceUpdatedAt?:string|null;
   pickupPointCode?:string|null;
+  variants?:Array<{name:string;values:string[]}>;
 };
 
 const FIRST_LINK="https://s.blibli.com/GNtk/0qrtsw3f";
@@ -131,7 +132,8 @@ function buildDbProducts(catalog:CatalogIdentity[],resolved:Record<string,Resolv
       currency:meta?.currency||null,
       description:meta?.description||null,
       priceUpdatedAt:meta?.priceUpdatedAt||null,
-      pickupPointCode:meta?.pickupPointCode||null
+      pickupPointCode:meta?.pickupPointCode||null,
+      variants:meta?.variants||[]
     });
   });
   return products;
@@ -225,6 +227,7 @@ function dbToLocal(products:DbProduct[]){
       description:p.description||null,
       priceUpdatedAt:p.priceUpdatedAt||null,
       pickupPointCode:p.pickupPointCode||null,
+      variants:p.variants||[],
       ok:true
     };
   }
@@ -1290,6 +1293,12 @@ export default function AdminPage(){
                   <span>LIVE PRICE</span>
                   <b>{formatAdminPrice(meta?.price,meta?.currency)||"Belum ada harga tersimpan"}</b>
                   <small>{formatAdminPriceAge(meta?.priceUpdatedAt)}</small>
+                </div>
+                <div className="admin-meta-data">
+                  <small><strong>Deskripsi:</strong> {meta?.description?"Tersimpan":"Belum terbaca"}</small>
+                  {meta?.variants?.length?<div className="admin-variant-list">
+                    {meta.variants.map(group=><div key={group.name}><b>{group.name}</b><span>{group.values.join(" · ")}</span></div>)}
+                  </div>:<small><strong>Varian:</strong> Belum terbaca</small>}
                 </div>
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
