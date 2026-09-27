@@ -386,7 +386,7 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
   // Fallback 2: Domainee's browser-safe redirect checker.
   try{
     const endpoint="https://api.domainee.dev/v1/tools/redirect-checker?url="+encodeURIComponent(inputUrl);
-    const response=await globalThis.fetch(endpoint,{cache:"no-store"});
+    const response=await fetchWithTimeout(endpoint,{cache:"no-store"},12000);
     if(response.ok){
       const payload=await response.json();
       const candidates=[
@@ -501,7 +501,7 @@ async function enrichResolvedImages(data:ResolvedProduct,inputUrl:string):Promis
   // Reader fallback: collect any Blibli catalog images embedded in markdown/text.
   for(const target of targets){
     try{
-      const response=await globalThis.fetch("https://r.jina.ai/"+target,{cache:"no-store"});
+      const response=await fetchWithTimeout("https://r.jina.ai/"+target,{cache:"no-store"},12000);
       if(!response.ok) continue;
       const body=await response.text();
       add(body.match(/https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\s<>\])]+/ig)||[]);
@@ -698,7 +698,7 @@ export default function AdminPage(){
 
     async function syncVisitorPrices(){
       if(stopped||pending||document.visibilityState==="hidden") return;
-      if(busy||refreshingUrl||reloadingUrl||bulkAction||dirtyUrls.length) return;
+      if(importIsActive||refreshingUrl||reloadingUrl||bulkAction||dirtyUrls.length) return;
       pending=true;
       try{
         await pullDatabase();
@@ -813,8 +813,9 @@ export default function AdminPage(){
           setBusy(false);
         }
       }catch{
-        // Network polling failure must not leave a terminal N/N job locking UI.
-        if(!importIsActive) setBusy(false);
+        // The persisted job state remains authoritative. A network timeout must
+        // not leave a browser-only busy flag stuck forever.
+        setBusy(false);
       }finally{
         pending=false;
       }
