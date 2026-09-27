@@ -21,3 +21,7 @@ footer{border-top:1px solid var(--line);padding:20px clamp(14px,4vw,48px);displa
 .spec-table{display:grid;gap:0;border:1px solid #20344a;border-radius:8px;overflow:hidden}.spec-table>div{display:grid;grid-template-columns:minmax(90px,.8fr) minmax(0,1.4fr);gap:8px;padding:7px 8px;font-size:10px}.spec-table>div+div{border-top:1px solid #20344a}.spec-table span{color:#8196ad}.spec-table b{color:#c7d9eb;font-weight:600}
 .admin-commerce{max-width:680px}.admin-detail{max-width:900px;margin-bottom:8px}
 @media(max-width:680px){.commerce-row{align-items:flex-start;flex-direction:column}.spec-table>div{grid-template-columns:1fr}.sold-text{white-space:normal}}
+
+
+/* Stable catalog mode: live commerce data is checked directly on Blibli. */
+.stable-fields{display:grid;gap:5px}.stable-fields small{display:block;line-height:1.5}.stable-fields strong{font-weight:800}
