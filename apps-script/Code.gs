@@ -128,6 +128,7 @@ function resolveProduct_(url){
   if(fastImages.length){
     p.images=fastImages;
     p.source='fast-image-resolver';
+    log_('IMAGE_RESOLVE',id,'OK',fastImages.length+' foto · fast');
   }else{
     // Heavy Blibli reload is a last resort for this single product only.
     p=reloadFromBlibli_(seed);
@@ -139,7 +140,12 @@ function resolveProduct_(url){
   // returning an empty gallery when Blibli's own endpoints are blocked.
   if(!p.images||!p.images.length){
     p.images=indexedImageSearch_(p);
-    if(p.images.length)p.source='indexed-image-resolver';
+    if(p.images.length){
+      p.source='indexed-image-resolver';
+      log_('IMAGE_RESOLVE',id,'OK',p.images.length+' foto · indexed');
+    }else{
+      log_('IMAGE_RESOLVE',id,'EMPTY','tidak ada image fallback');
+    }
   }
 
   return resolvedShape_(p,url);
@@ -2525,13 +2531,15 @@ function fastImageGallery_(p){
   const known=KNOWN_BLIBLI_GALLERIES[id]||[];
   if(known.length)images=images.concat(known);
 
+  // Public image index is the fast path. It avoids the slow Blibli PDP/summary
+  // chain that is frequently blocked by anti-bot verification.
   if(images.length<2){
-    const searchMedia=searchProductMediaData_(id,p&&p.name||'',p&&p.canonicalUrl||p&&p.affiliateUrl||'');
-    images=images.concat(searchMedia.images||[]);
+    images=images.concat(indexedImageSearch_(p));
   }
 
   if(images.length<2){
-    images=images.concat(indexedImageSearch_(p));
+    const searchMedia=searchProductMediaData_(id,p&&p.name||'',p&&p.canonicalUrl||p&&p.affiliateUrl||'');
+    images=images.concat(searchMedia.images||[]);
   }
 
   if(images.length<2){
