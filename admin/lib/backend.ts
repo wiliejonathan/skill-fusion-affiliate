@@ -48,7 +48,9 @@ export async function backendFetch(input:string,init:RequestInit={}){
   const url=new URL(input,"https://skill-fusion.invalid");
   const method=init.method||"GET";
   let action="draft",payload:Record<string,unknown>={};
-  if(url.pathname==="/api/catalog"){
+  if(url.pathname==="/api/health-check"){
+    action="health";
+  }else if(url.pathname==="/api/catalog"){
     if(method==="POST") {action="savePublish";payload=JSON.parse(String(init.body||"{}"))}
     else if(method==="DELETE") {action="delete";payload={id:url.searchParams.get("id")}}
   }else if(url.pathname==="/api/resolve"||url.pathname==="/api/reload-dom"){
@@ -62,7 +64,9 @@ export async function backendFetch(input:string,init:RequestInit={}){
   }else throw new Error("API tidak dikenal");
 
   try{
-    const data=await requestAppsScript(action,payload,getKey());
+    const data=action==="health"
+      ? await requestAppsScript("health",payload)
+      : await requestAppsScript(action,payload,getKey());
     return {ok:true,json:async()=>data};
   }catch(error){
     if(!window.sessionStorage.getItem(SESSION_KEY)){
