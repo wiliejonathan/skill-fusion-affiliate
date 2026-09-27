@@ -514,6 +514,20 @@ async function enrichResolvedImages(data:ResolvedProduct,inputUrl:string):Promis
   return {...data,image:null,images:[]};
 }
 
+async function fetchWithTimeout(
+  input:Parameters<typeof fetch>[0],
+  init:RequestInit={},
+  timeoutMs=30000
+){
+  const controller=new AbortController();
+  const timer=window.setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    return await fetch(input,{...init,signal:controller.signal});
+  }finally{
+    window.clearTimeout(timer);
+  }
+}
+
 export default function AdminPage(){
   const [text,setText]=useState("");
   const [importMode,setImportMode]=useState<ImportMode>("single");
@@ -537,6 +551,11 @@ export default function AdminPage(){
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
   const [duplicatePopup,setDuplicatePopup]=useState<{title:string;items:string[]}|null>(null);
   const [importJob,setImportJob]=useState<ImportJobState|null>(null);
+  const importIsActive=Boolean(
+    importJob &&
+    (importJob.status==="queued"||importJob.status==="running") &&
+    !(importJob.total>0&&importJob.done>=importJob.total&&!importJob.checkpoint)
+  );
 
   async function applyServerProducts(products:DbProduct[]){
     const server=dbToLocal(products);
@@ -581,11 +600,11 @@ export default function AdminPage(){
   async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
     const products=buildDbProducts(nextCatalog,nextResolved);
     if(!products.length) return null;
-    const res=await fetch("/api/catalog",{
+    const res=await fetchWithTimeout("/api/catalog",{
       method:"POST",
       headers:{"content-type":"application/json"},
       body:JSON.stringify({products})
-    });
+    },45000);
     const data=await res.json();
     if(data?.ok&&Array.isArray(data.products)){
       setServerReady(true);
@@ -595,7 +614,7 @@ export default function AdminPage(){
   }
 
   async function pullDatabase(){
-    const res=await fetch("/api/catalog",{cache:"no-store"});
+    const res=await fetchWithTimeout("/api/catalog",{cache:"no-store"},20000);
     const data=await res.json();
     if(data?.ok&&Array.isArray(data.products)){
       const local=dbToLocal(data.products as DbProduct[]);
@@ -712,14 +731,36 @@ export default function AdminPage(){
       if(stopped||pending) return;
       pending=true;
       try{
-        const res=await fetch("/api/import-job",{cache:"no-store"});
+        const res=await fetchWithTimeout("/api/import-job",{cache:"no-store"},20000);
         const data=await res.json();
-        const job=(data?.job||null) as ImportJobState|null;
+        let job=(data?.job||null) as ImportJobState|null;
+
+        if(
+          job &&
+          (job.status==="queued"||job.status==="running") &&
+          job.total>0 &&
+          job.done>=job.total &&
+          !job.checkpoint
+        ){
+          // Self-heal an older backend that persisted running N/N just before
+          // writing the terminal status. A kick finalizes it without re-importing.
+          try{
+            const finalRes=await fetchWithTimeout("/api/import-kick",{method:"POST"},20000);
+            const finalData=await finalRes.json();
+            if(finalData?.job) job=finalData.job as ImportJobState;
+          }catch{}
+        }
         if(stopped) return;
 
         setImportJob(job);
 
-        if(job&&(job.status==="queued"||job.status==="running")){
+        const jobIsActive=Boolean(
+          job &&
+          (job.status==="queued"||job.status==="running") &&
+          !(job.total>0&&job.done>=job.total&&!job.checkpoint)
+        );
+
+        if(job&&jobIsActive){
           setBusy(true);
           const checkpointText=job.checkpoint
             ? ` · checkpoint #${job.checkpoint.index+1} ${job.checkpoint.phase} · attempt ${job.checkpoint.attempts}`
@@ -735,7 +776,7 @@ export default function AdminPage(){
           // clock trigger. Kick up to two queued products immediately.
           if(document.visibilityState!=="hidden"){
             try{
-              const kickRes=await fetch("/api/import-kick",{method:"POST"});
+              const kickRes=await fetchWithTimeout("/api/import-kick",{method:"POST"},85000);
               const kickData=await kickRes.json();
               const kicked=(kickData?.job||null) as ImportJobState|null;
               if(kicked&&!stopped){
@@ -772,7 +813,8 @@ export default function AdminPage(){
           setBusy(false);
         }
       }catch{
-        // Keep the current screen; the server-side job continues independently.
+        // Network polling failure must not leave a terminal N/N job locking UI.
+        if(!importIsActive) setBusy(false);
       }finally{
         pending=false;
       }
@@ -796,7 +838,15 @@ export default function AdminPage(){
     setNotice("");
   }
 
+  function prepareNewImportInput(){
+    if(importJob&&!importIsActive){
+      setImportJob(null);
+      setBusy(false);
+    }
+  }
+
   function handleImportTextChange(value:string){
+    prepareNewImportInput();
     if(importMode==="single"){
       const links=extractHttpLinks(value);
       if(links.length){
@@ -817,6 +867,7 @@ export default function AdminPage(){
   }
 
   function handleImportPaste(event:React.ClipboardEvent<HTMLTextAreaElement>){
+    prepareNewImportInput();
     const pasted=event.clipboardData.getData("text");
     if(!pasted) return;
     event.preventDefault();
@@ -830,6 +881,7 @@ export default function AdminPage(){
   }
 
   async function pasteImportLinks(){
+    prepareNewImportInput();
     try{
       const pasted=await navigator.clipboard.readText();
       if(!pasted.trim()){
@@ -850,6 +902,15 @@ export default function AdminPage(){
       setNotice("");
     }catch{
       setNotice("Clipboard tidak dapat dibaca. Izinkan akses clipboard di browser lalu coba lagi.");
+    }
+  }
+
+  function clearMultipleLinks(){
+    setText("");
+    setNotice("");
+    if(importJob&&!importIsActive){
+      setImportJob(null);
+      setBusy(false);
     }
   }
 
@@ -887,11 +948,21 @@ export default function AdminPage(){
     setNotice(`Menyiapkan background import · ${ready.length} link...`);
 
     try{
-      const res=await fetch("/api/import-job",{
+      if(
+        importJob &&
+        (importJob.status==="queued"||importJob.status==="running") &&
+        importJob.total>0 &&
+        importJob.done>=importJob.total &&
+        !importJob.checkpoint
+      ){
+        await fetchWithTimeout("/api/import-kick",{method:"POST"},20000).catch(()=>null);
+      }
+
+      const res=await fetchWithTimeout("/api/import-job",{
         method:"POST",
         headers:{"content-type":"application/json"},
         body:JSON.stringify({links:ready.map(row=>row.inputUrl)})
-      });
+      },30000);
       const data=await res.json();
       const job=data?.job as ImportJobState|undefined;
       if(!res.ok||!data?.ok||!job) throw new Error(data?.message||"Background import gagal dimulai.");
@@ -901,7 +972,7 @@ export default function AdminPage(){
 
       // Start the first worker batch immediately. The Apps Script trigger remains
       // scheduled as a fallback if this tab closes during or after the request.
-      void fetch("/api/import-kick",{method:"POST"}).catch(()=>{});
+      void fetchWithTimeout("/api/import-kick",{method:"POST"},85000).catch(()=>{});
 
       if(preflightDuplicates.length){
         setDuplicatePopup({
@@ -1033,9 +1104,9 @@ export default function AdminPage(){
     setProductNotice(prev=>({...prev,[url]:"Reload DOM Blibli sedang berjalan..."}));
 
     try{
-      const res=await fetch(
+      const res=await fetchWithTimeout(
         "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now(),
-        {cache:"no-store"}
+        {cache:"no-store"},45000
       );
       let data:ResolvedProduct=await res.json();
 
@@ -1070,7 +1141,7 @@ export default function AdminPage(){
   }
 
   async function refreshDataAll(){
-    if(bulkAction||refreshingUrl||reloadingUrl) return;
+    if(importIsActive||bulkAction||refreshingUrl||reloadingUrl) return;
 
     setBulkAction("refresh");
     setNotice("Refresh Data All · mengirim seluruh data Admin ke Client...");
@@ -1092,7 +1163,7 @@ export default function AdminPage(){
   }
 
   async function repairMissingImages(){
-    if(bulkAction||refreshingUrl||reloadingUrl) return;
+    if(importIsActive||bulkAction||refreshingUrl||reloadingUrl) return;
 
     const missingCount=buildDbProducts(catalog,resolved).filter(product=>!product.images?.length).length;
     if(!missingCount){
@@ -1104,7 +1175,7 @@ export default function AdminPage(){
     setNotice(`Repair Missing Images · mencari image untuk ${missingCount} produk tanpa foto...`);
 
     try{
-      const res=await fetch("/api/repair-images",{method:"POST"});
+      const res=await fetchWithTimeout("/api/repair-images",{method:"POST"},60000);
       const data=await res.json();
       if(!res.ok||!data?.ok||!Array.isArray(data.products)){
         throw new Error(data?.message||"Repair image gagal");
@@ -1131,7 +1202,7 @@ export default function AdminPage(){
   }
 
   async function reloadAll(){
-    if(bulkAction||refreshingUrl||reloadingUrl) return;
+    if(importIsActive||bulkAction||refreshingUrl||reloadingUrl) return;
 
     setBulkAction("reload");
     let nextCatalog=[...catalog];
@@ -1156,10 +1227,10 @@ export default function AdminPage(){
         setNotice(`Reload All · membaca DOM Blibli ${index+1}/${catalog.length}...`);
 
         try{
-          const res=await fetch(
+          const res=await fetchWithTimeout(
             "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now()+"-"+index,
-            {cache:"no-store"}
-          );
+            {cache:"no-store"},45000
+      );
           let data:ResolvedProduct=await res.json();
           if(!res.ok||!data?.ok) throw new Error(data?.message||"Reload DOM gagal");
 
@@ -1302,25 +1373,25 @@ export default function AdminPage(){
         <div className="header-controls">
           <div className="dashboard-actions">
             <button
-              className="dashboard-action refresh-all"
+              className={"dashboard-action refresh-all"+(bulkAction==="refresh"?" loading":"")}
               onClick={refreshDataAll}
-              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||importIsActive}
             >
               <RefreshCw size={16}/>
               {bulkAction==="refresh"?"Refreshing All...":"Refresh Data All"}
             </button>
             <button
-              className="dashboard-action repair-images"
+              className={"dashboard-action repair-images"+(bulkAction==="repair"?" loading":"")}
               onClick={repairMissingImages}
-              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||importIsActive}
             >
               <PackageSearch size={16}/>
               {bulkAction==="repair"?"Repairing Images...":"Repair Missing Images"}
             </button>
             <button
-              className="dashboard-action reload-all"
+              className={"dashboard-action reload-all"+(bulkAction==="reload"?" loading":"")}
               onClick={reloadAll}
-              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||importIsActive}
             >
               <PackageSearch size={16}/>
               {bulkAction==="reload"?"Reloading All...":"Reload All"}
@@ -1368,6 +1439,16 @@ export default function AdminPage(){
               :"Paste link sebanyak apa pun. Sistem otomatis memisahkan setiap URL yang diawali http/https."
             }
           />
+          {importMode==="multiple"&&<button
+            type="button"
+            className="clear-links-btn"
+            onClick={clearMultipleLinks}
+            disabled={!text.trim()}
+            aria-label="Clear semua link"
+            title="Clear semua link"
+          >
+            <Trash2 size={14}/> Clear
+          </button>}
           {importMode==="multiple"&&<div
             className="detected-link-counter"
             aria-live="polite"
@@ -1396,13 +1477,13 @@ export default function AdminPage(){
             ?"Single Link aktif — hanya 1 link yang akan diproses."
             :"Multiple Link aktif — link berantakan otomatis dipisah, dirapikan, dicek duplicate, lalu diproses satu per satu."
           }</p>
-          <button onClick={analyzeLinks} disabled={busy||!checks.length}>
-            {busy&&importJob&&(importJob.status==="queued"||importJob.status==="running")
+          <button onClick={analyzeLinks} disabled={importIsActive||!checks.length}>
+            {importIsActive&&importJob
               ?`Import ${importJob.done}/${importJob.total}`
               :(busy?"Menyiapkan...":"Import Produk")}
           </button>
         </div>
-        {importJob&&(importJob.status==="queued"||importJob.status==="running")&&<div className="import-job-progress">
+        {importJob&&importIsActive&&<div className="import-job-progress">
           <div className="import-job-progress-head">
             <strong>BACKGROUND IMPORT</strong>
             <span>{importJob.done}/{importJob.total}</span>
