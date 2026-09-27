@@ -2537,12 +2537,12 @@ function fastImageGallery_(p){
     images=images.concat(indexedImageSearch_(p));
   }
 
-  if(images.length<2){
+  if(!images.length){
     const searchMedia=searchProductMediaData_(id,p&&p.name||'',p&&p.canonicalUrl||p&&p.affiliateUrl||'');
     images=images.concat(searchMedia.images||[]);
   }
 
-  if(images.length<2){
+  if(!images.length){
     images=images.concat(officialFallbackImages_(id));
   }
 
