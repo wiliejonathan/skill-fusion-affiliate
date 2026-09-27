@@ -27,7 +27,9 @@ export const PRODUCT_CATEGORY_ORDER=[
   "Feature Phone",
   "Tablet",
   "TWS & Earbuds",
-  "Smartwatch & Smartband",
+  "Earphone Kabel",
+  "Smartwatch",
+  "Smartband",
   "Baterai HP",
   "Aksesori Smartwatch",
   "Aksesori TWS",
@@ -42,19 +44,19 @@ export function inferProductCategory(product:Pick<Product,"name"|"category"|"fea
   const watchContext=/\b(watch|smartwatch|smart\s*band|smartband|garmin|fit\s*3|fit3|venu|gt\s*6|gt6|iwatch)\b/i.test(text);
   const accessory=/\b(strap|wristband|tali\s+jam|screen\s*protector|anti\s+gores|tempered\s+glass|case|casing|cover|bumper)\b/i.test(text);
 
-  // Accessories first, otherwise words like "watch" or "buds" would make
-  // protective accessories look like the main device itself.
   if(accessory&&watchContext) return "Aksesori Smartwatch";
   if(/\b(case|casing|cover)\b/i.test(text)&&/\b(tws|airpods?|earbuds?|buds\b|earphone)\b/i.test(text)) return "Aksesori TWS";
   if(/\b(wrist\s+strap|phone\s+strap|casetify)\b/i.test(text)) return "Aksesori Smartphone";
 
-  // Product types are deliberately specific to the current Skill Fusion
-  // catalog. Priority prevents "built-in cable" power banks and charger
-  // bundles from leaking into the cable filter.
   if(/\b(power\s*bank|powerbank|portable\s+power\s+bank)\b/i.test(text)) return "Power Bank";
   if(/\b(galaxy\s+tab|redmi\s+pad|poco\s+pad|xpad|motopad|tablet|ipad\b|pad\s+se\b|pad\s+2\b|tab\s+s\d|tab\s+a\d)\b/i.test(text)) return "Tablet";
-  if(/\b(airpods?|earbuds?|earphone|headset|tws|buds\b|freebuds|freeclip|enco\s+buds|soundcore\s+r\d+i)\b/i.test(text)) return "TWS & Earbuds";
-  if(/\b(smartwatch|smart\s*watch|smartband|smart\s*band|watch\s+fit|watch\s+gt|redmi\s+watch|gt\s+watch|galaxy\s+fit|huawei\s+band|forerunner)\b/i.test(text)) return "Smartwatch & Smartband";
+
+  if(/\bearphone\b/i.test(text)&&!/\b(tws|wireless|bluetooth|buds|freebuds|freeclip|airpods)\b/i.test(text)) return "Earphone Kabel";
+  if(/\b(airpods?|earbuds?|headset|tws|buds\b|freebuds|freeclip|enco\s+buds|soundcore\s+r\d+i|wireless\s+earphone|bluetooth\s+earphone)\b/i.test(text)||/\bearphone\b.*\b(wireless|bluetooth)\b/i.test(text)) return "TWS & Earbuds";
+
+  if(/\b(smartband|smart\s*band|galaxy\s+fit|huawei\s+band)\b/i.test(text)) return "Smartband";
+  if(/\b(smartwatch|smart\s*watch|watch\s+fit|watch\s+gt|redmi\s+watch|gt\s+watch|forerunner)\b/i.test(text)) return "Smartwatch";
+
   if(/\b(baterai|battery|batre|batrai|batrei)\b/i.test(text)) return "Baterai HP";
   if(/\b(nokia\s+(?:105|110|150)|feature\s*phone|handphone\s+jadul)\b/i.test(text)) return "Feature Phone";
 
@@ -73,9 +75,6 @@ export function inferProductCategory(product:Pick<Product,"name"|"category"|"fea
   if(/\b(kabel|cable|charging\s+cable|data\s+cable|usb\s+[ac]\s+to|type\s*c\s+to|lightning\s+cable)\b/i.test(text)) return "Kabel Data & Charging";
 
   if(accessory) return "Aksesori Smartphone";
-
-  // Keep truly unmatched products visible, but don't manufacture a filter for
-  // them unless such a product actually exists.
   return "Lainnya";
 }
 
