@@ -1,0 +1,54 @@
+name: Build Android Admin APK
+
+on:
+  push:
+    branches:
+      - feat/android-admin-mechanical-apk
+    paths:
+      - "android-admin/**"
+      - ".github/workflows/build-android-admin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build installable APK
+        run: gradle -p android-admin :app:assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp android-admin/app/build/outputs/apk/debug/app-debug.apk dist/SkillFusion-Admin-Mechanical-v1.0.0.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkillFusion-Admin-Mechanical-v1.0.0
+          path: dist/SkillFusion-Admin-Mechanical-v1.0.0.apk
+          if-no-files-found: error
+          retention-days: 30
