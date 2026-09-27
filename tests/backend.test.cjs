@@ -141,3 +141,24 @@ test('stale running N/N import job self-heals to completed',()=>{
  assert.equal(saved.cursor,1);
  assert.equal(saved.done,1);
 });
+
+
+test('product category classifier separates cable, power bank and wearable products',()=>{
+ const {ctx}=setup();
+ assert.equal(
+  ctx.inferCategory_('UGREEN kabel data iPhone type c to lightning fast charging','Charging & Cable',[]),
+  'Charging & Cable'
+ );
+ assert.equal(
+  ctx.inferCategory_('ANKER Zolo portable power bank 20000mAh built in type c cable','Charging & Cable',[]),
+  'Power Bank'
+ );
+ assert.equal(
+  ctx.inferCategory_('GARMIN Forerunner 165 Black Slate','Charging & Cable',[]),
+  'Smartwatch & Wearable'
+ );
+ assert.equal(
+  ctx.inferCategory_('UGREEN 65W GaN Wall Charger USB C','Charging & Cable',[]),
+  'Charger & Adapter'
+ );
+});

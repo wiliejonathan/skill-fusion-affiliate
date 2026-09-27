@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:20,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:21,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -239,7 +239,7 @@ function importProductFromResolved_(resolved,url){
     canonicalProductId:id,
     name:name,
     brand:inferBrand_(name,id),
-    category:'Charging & Cable',
+    category:inferCategory_(name,resolved&&resolved.category,resolved&&resolved.specifications),
     images:images,
     affiliateUrl:url,
     canonicalUrl:canonical,
@@ -471,7 +471,7 @@ function validBlibliUrl_(url){
   if(!/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value))throw new Error('URL harus HTTPS Blibli');
   return value;
 }
-function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,originalPrice:p.originalPrice||null,discountPercent:p.discountPercent||null,soldText:p.soldText||null,description:p.description||null,specifications:Array.isArray(p.specifications)?p.specifications:[],priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null,variants:Array.isArray(p.variants)?p.variants:[]}}
+function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,brand:p.brand||null,category:inferCategory_(p.name,p.category,p.specifications),image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,originalPrice:p.originalPrice||null,discountPercent:p.discountPercent||null,soldText:p.soldText||null,description:p.description||null,specifications:Array.isArray(p.specifications)?p.specifications:[],priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null,variants:Array.isArray(p.variants)?p.variants:[]}}
 function resolveProduct_(url){
   validBlibliUrl_(url);
 
@@ -671,7 +671,9 @@ function rowToProduct_(r){
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
   try{variants=JSON.parse(r[18]||'[]')}catch(e){}
   try{specifications=JSON.parse(r[22]||'[]')}catch(e){}
-  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||''),variants:Array.isArray(variants)?variants:[],soldText:String(r[19]||''),originalPrice:String(r[20]||''),discountPercent:String(r[21]||''),specifications:Array.isArray(specifications)?specifications:[]};
+  const name=String(r[3]||'');
+  const storedCategory=String(r[5]||'');
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:name,brand:String(r[4]||''),category:inferCategory_(name,storedCategory,specifications),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||''),variants:Array.isArray(variants)?variants:[],soldText:String(r[19]||''),originalPrice:String(r[20]||''),discountPercent:String(r[21]||''),specifications:Array.isArray(specifications)?specifications:[]};
 }
 function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
 function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||'',p.pickupPointCode||'',JSON.stringify(p.variants||[]),p.soldText||'',p.originalPrice||'',p.discountPercent||'',JSON.stringify(p.specifications||[])].map(safeCell_)}
@@ -788,8 +790,9 @@ function reloadFromBlibli_(p){
   const originalPrice=normalizePrice_(domData.originalPrice||summary.originalPrice||readerData.originalPrice||p.originalPrice||'');
   const discountPercent=normalizeDiscountPercent_(domData.discountPercent||summary.discountPercent||readerData.discountPercent||p.discountPercent||'');
   const brand=domData.brand||summary.brand||readerData.brand||specValue_(specifications,'Merk')||p.brand||inferBrand_(title,id);
-  const category=domData.category||summary.category||readerData.category||specValue_(specifications,'Kategori')||p.category||'';
+  const rawCategory=domData.category||summary.category||readerData.category||specValue_(specifications,'Kategori')||p.category||'';
   if(!isUsableProductTitle_(title))title=p.name;
+  const category=inferCategory_(title,rawCategory,specifications);
   return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:brand,category:category,features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,originalPrice:originalPrice,discountPercent:discountPercent,soldText:soldText,description:description,specifications:specifications,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
 
@@ -3137,4 +3140,33 @@ function productId_(url){const m=String(url||'').match(/\/is--([^/?#]+)/i);retur
 function pick_(text,patterns){for(let i=0;i<patterns.length;i++){const m=String(text||'').match(patterns[i]);if(m&&m[1])return String(m[1]).replace(/&amp;/g,'&').trim()}return ''}
 function unique_(arr){return Array.from(new Set((arr||[]).filter(Boolean)))}
 function inferBrand_(title,id){const u=String(title||'').toUpperCase();if(u.indexOf('XIAOMI')===0||String(id).indexOf('XIO-')===0)return 'XIAOMI';if(u.indexOf('ACMIC')===0||String(id).indexOf('ACO-')===0)return 'ACMIC';return String(title||'TECH').split(/\s+/)[0].toUpperCase()}
+function inferCategory_(title,storedCategory,specifications){
+  const name=String(title||'').toLowerCase();
+  const stored=String(storedCategory||specValue_(specifications||[],'Kategori')||'').toLowerCase();
+  const text=name.replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
+
+  if(/\b(power\s*bank|powerbank|battery\s*pack|portable\s+charger)\b/i.test(text))return 'Power Bank';
+  if(/\b(smart\s*watch|smartwatch|fitness\s*(?:band|tracker)|forerunner|apple\s*watch|galaxy\s*watch|amazfit|smart\s*band|garmin\s+(?:venu|vivo|instinct|fenix|epix))\b/i.test(text))return 'Smartwatch & Wearable';
+  if(/\b(earbuds?|earphones?|headphones?|headsets?|tws|speaker|soundbar|microphone|audio)\b/i.test(text))return 'Audio';
+  if(/\b(smart\s*home|smart\s*plug|smart\s*bulb|ip\s*camera|cctv|doorbell|robot\s*vacuum|vacuum\s*cleaner|air\s*purifier|smart\s*sensor)\b/i.test(text))return 'Smart Home';
+  if(/\b(router|wi-?fi|modem|mesh\s*wifi|ethernet|network\s*switch|ssd|hdd|hard\s*drive|flash\s*drive|usb\s*drive|micro\s*sd|memory\s*card|nas\b)\b/i.test(text))return 'Networking & Storage';
+  if(/\b(keyboard|mouse|monitor|laptop|notebook|webcam|gamepad|controller|usb\s*hub|type\s*c\s*hub|docking\s*station)\b/i.test(text))return 'Computer & Peripheral';
+  if(/\b(kabel|cable|braided\s+line|data\s+charger|data\s+cable|lightning\s+cable|usb\s*[ac]\s*to|usb-?[ac]\s*to|type\s*-?c\s*to|c\s*to\s*c)\b/i.test(text))return 'Charging & Cable';
+  if(/\b(gan\s*charger|wall\s*charger|travel\s*charger|wireless\s*charger|charging\s*station|charging\s*dock|car\s*charger|power\s*adapter|power\s*adaptor|adapter|adaptor|kepala\s*charger)\b/i.test(text))return 'Charger & Adapter';
+  if(/\b(smartphone|handphone|mobile\s+phone|iphone\b|ipad\b|tablet\b|galaxy\s+[asz]\d|redmi\s+note|poco\s+[a-z0-9])\b/i.test(text))return 'Smartphone & Tablet';
+  if(/\b(case|casing|cover|holder|stand|mount|screen\s*protector|tempered\s*glass|strap|stylus|sleeve|pouch)\b/i.test(text))return 'Tech Accessories';
+
+  if(/power\s*bank/i.test(stored))return 'Power Bank';
+  if(/watch|wearable|fitness/i.test(stored))return 'Smartwatch & Wearable';
+  if(/audio|earphone|headphone|speaker/i.test(stored))return 'Audio';
+  if(/smartphone|handphone|tablet/i.test(stored))return 'Smartphone & Tablet';
+  if(/smart\s*home|home\s*appliance/i.test(stored))return 'Smart Home';
+  if(/network|storage|router|ssd|memory/i.test(stored))return 'Networking & Storage';
+  if(/computer|peripheral|keyboard|mouse|laptop/i.test(stored))return 'Computer & Peripheral';
+  if(/charger|adapter|adaptor/i.test(stored)&&!/cable|kabel/i.test(stored))return 'Charger & Adapter';
+  if(/cable|kabel/i.test(stored))return 'Charging & Cable';
+  if(/accessor/i.test(stored))return 'Tech Accessories';
+  return 'Other Tech';
+}
+
 function inferFeatures_(title){const v=String(title||'').toLowerCase(),f=[];if(/100\s*cm/.test(v))f.push('100 cm');if(/type\s*-?\s*c|usb\s*c/.test(v))f.push('USB Type-C');if(/power delivery|\bpd\b/.test(v))f.push('Power Delivery');else if(/fast\s*charging|6a/.test(v))f.push('Fast charging');return f.length?f:['Blibli Affiliate']}

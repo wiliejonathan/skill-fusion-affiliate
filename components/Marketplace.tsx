@@ -5,7 +5,7 @@ import {ArrowRight,AtSign,Cpu,Filter,Heart,Search,ShieldCheck,Sparkles,X,Zap} fr
 import Link from "next/link";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
-import {categories,type Product} from "@/lib/products";
+import {getAvailableProductCategories,inferProductCategory,type Product} from "@/lib/products";
 import {useSyncedProducts} from "@/lib/useSyncedProducts";
 import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
 
@@ -30,17 +30,36 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
     };
   },[]);
 
+  const classifiedProducts=useMemo(
+    ()=>products.map(product=>{
+      const nextCategory=inferProductCategory(product);
+      return nextCategory===product.category?product:{...product,category:nextCategory};
+    }),
+    [products]
+  );
+
+  const availableCategories=useMemo(
+    ()=>getAvailableProductCategories(classifiedProducts),
+    [classifiedProducts]
+  );
+
+  useEffect(()=>{
+    if(category!=="Semua"&&!availableCategories.includes(category)){
+      setCategory("Semua");
+    }
+  },[category,availableCategories]);
+
   const filtered=useMemo(()=>{
     const q=query.trim().toLowerCase();
-    return products
+    return classifiedProducts
       .filter(p=>{
-        const searchable=[p.name,p.brand,p.category,...p.features].join(" ").toLowerCase();
+        const searchable=[p.name,p.brand,p.category,...(p.features||[])].join(" ").toLowerCase();
         return (!q||searchable.includes(q))&&(category==="Semua"||p.category===category);
       })
       // Newest product first: the highest sequence/product number is always
       // displayed at the top of the catalog.
       .sort((a,b)=>(b.sequence||0)-(a.sequence||0));
-  },[query,category,products]);
+  },[query,category,classifiedProducts]);
 
   function toggleWishlist(id:string){
     setWishlist(toggleWishlistId(id));
@@ -53,7 +72,7 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
     </div>
     <div className="filter-section">
       <div className="category-list">
-        {categories.map((item,i)=><button key={item} className={category===item?"category-item active":"category-item"} onClick={()=>{setCategory(item);setMobileFilters(false)}}>
+        {availableCategories.map((item,i)=><button key={item} className={category===item?"category-item active":"category-item"} onClick={()=>{setCategory(item);setMobileFilters(false)}}>
           <span className="cat-index">0{i+1}</span><span>{item}</span>
         </button>)}
       </div>
