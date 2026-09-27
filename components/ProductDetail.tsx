@@ -1,82 +1,22 @@
 "use client";
 
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useState} from "react";
 import Link from "next/link";
 import {AtSign,Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2,X,ZoomIn} from "lucide-react";
 import BrandLogo from "./BrandLogo";
 import type {Product} from "@/lib/products";
 import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
-import {requestAppsScript} from "@/shared/apps-script";
 
 const IG_OWNER="https://www.instagram.com/wilie_jonathan/";
 const IG_BRAND="https://www.instagram.com/skill.fusion.id/";
-
-function prevHasPrice(value:string|null|undefined){
-  return !!String(value||"").trim();
-}
 
 export default function ProductDetail({product}:{product:Product}){
   const [active,setActive]=useState(0);
   const [liked,setLiked]=useState(false);
   const [lightbox,setLightbox]=useState(false);
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
-  const [livePrice,setLivePrice]=useState({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:false});
-  const [liveDescription,setLiveDescription]=useState(String(product.description||"").trim());
-  const [liveVariants,setLiveVariants]=useState(product.variants||[]);
   const images=product.images||[];
   const count=images.length;
-  const formattedPrice=useMemo(()=>{
-    const raw=String(livePrice.price||"").trim();
-    if(!raw) return null;
-    const numeric=Number(raw.replace(/[^0-9]/g,""));
-    if(!Number.isFinite(numeric)||numeric<=0) return null;
-    if((livePrice.currency||"IDR").toUpperCase()==="IDR"){
-      return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(numeric);
-    }
-    return `${livePrice.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
-  },[livePrice.price,livePrice.currency]);
-  const description=liveDescription||
-    `${product.name} adalah produk ${product.category.toLowerCase()} dari ${product.brand}. ${product.features.length?`Fitur utama: ${product.features.join(", ")}.`:""}`;
-
-  useEffect(()=>{
-    let mounted=true;
-    setLivePrice({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:true});
-    setLiveDescription(String(product.description||"").trim());
-    setLiveVariants(product.variants||[]);
-
-    async function refreshLivePrice(attempt=0){
-      try{
-        const data=await requestAppsScript("price",{id:product.id});
-        if(!mounted)return;
-
-        const nextPrice=data?.price||product.price||null;
-        setLivePrice({
-          price:nextPrice,
-          currency:data?.currency||product.currency||null,
-          updatedAt:data?.priceUpdatedAt||product.priceUpdatedAt||null,
-          loading:false
-        });
-        if(data?.description) setLiveDescription(String(data.description).trim());
-        if(Array.isArray(data?.variants)&&data.variants.length) setLiveVariants(data.variants);
-
-        // Blibli occasionally returns an empty/blocked response on the first hit.
-        // Retry once after the short backend throttle instead of leaving the user
-        // staring at a permanent loading label.
-        if(!nextPrice&&attempt===0){
-          window.setTimeout(()=>{if(mounted) void refreshLivePrice(1)},2500);
-        }
-      }catch{
-        if(!mounted)return;
-        setLivePrice(prev=>({...prev,loading:false}));
-        if(!prevHasPrice(product.price)&&attempt===0){
-          window.setTimeout(()=>{if(mounted) void refreshLivePrice(1)},2500);
-        }
-      }
-    }
-
-    refreshLivePrice();
-    return ()=>{mounted=false};
-  },[product.id,product.price,product.currency,product.priceUpdatedAt]);
 
   useEffect(()=>{
     setLiked(readWishlist().includes(product.id));
@@ -131,7 +71,7 @@ export default function ProductDetail({product}:{product:Product}){
   }
 
   return <div className="tech-site detail-shell">
-    <div className="top-rail"><div className="top-rail-inner"><span><i className="pulse-dot"/> PRODUCT INTELLIGENCE</span><span className="rail-divider"/><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a><span className="rail-divider"/><a href={IG_BRAND} target="_blank" rel="noreferrer">@skill.fusion.id</a></div></div>
+    <div className="top-rail"><div className="top-rail-inner"><span><i className="pulse-dot"/> PRODUCT CATALOG</span><span className="rail-divider"/><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a><span className="rail-divider"/><a href={IG_BRAND} target="_blank" rel="noreferrer">@skill.fusion.id</a></div></div>
     <header className="site-header tech-header detail-header">
       <div className="header-inner detail-header-inner">
         <Link className="brand" href="/"><BrandLogo/></Link>
@@ -160,7 +100,7 @@ export default function ProductDetail({product}:{product:Product}){
         </div>
 
         <div className="detail-info tech-panel">
-          <div className="detail-panel-label"><span>PRODUCT CORE</span><strong>ACTIVE</strong></div>
+          <div className="detail-panel-label"><span>PRODUCT CORE</span><strong>CATALOG</strong></div>
           <div className="detail-topline">
             <span className="detail-badge">{product.badge}</span>
             <div className="detail-actions">
@@ -185,44 +125,19 @@ export default function ProductDetail({product}:{product:Product}){
           <h1><span className="detail-sequence">#{String(product.sequence).padStart(3,"0")}</span> {product.name}</h1>
           <div className="detail-product-id"><ScanLine size={14}/> PRODUCT ID // {product.canonicalProductId}</div>
 
-          <div className="detail-price-box">
-            <span>LIVE MARKET PRICE</span>
-            <strong>{formattedPrice||"CHECK @ BLIBLI"}</strong>
-            <small>{
-              livePrice.loading
-                ? (formattedPrice?"Harga tersimpan ditampilkan · sinkronisasi Blibli berjalan...":"Mengambil harga Blibli terbaru...")
-                : livePrice.updatedAt
-                  ? "Harga diperbarui "+new Date(livePrice.updatedAt).toLocaleString("id-ID")
-                  : formattedPrice
-                    ? "Menampilkan harga tersimpan terakhir."
-                    : "Harga belum tersedia. Sistem akan mencoba lagi otomatis saat produk dikunjungi."
-            }</small>
-          </div>
-
-          <div className="detail-description">
-            <h2>PRODUCT DESCRIPTION</h2>
-            <p>{description}</p>
-          </div>
-
-          {liveVariants.length?<div className="detail-variants">
-            <h2>PRODUCT VARIANTS</h2>
-            <div className="detail-variant-groups">
-              {liveVariants.map((group)=>(
-                <div className="detail-variant-group" key={group.name}>
-                  <strong>{group.name}</strong>
-                  <div>{group.values.map(value=><span key={group.name+"-"+value}>{value}</span>)}</div>
-                </div>
-              ))}
-            </div>
-          </div>:null}
-
           <div className="detail-specs">
             <h2>PRODUCT SIGNALS</h2>
             <div className="detail-feature-grid">{product.features.map((feature,i)=><div key={feature}><span>0{i+1}</span><strong>{feature}</strong></div>)}</div>
           </div>
 
-          <a className="detail-buy-button mech-button primary" href={product.affiliateUrl} target="_blank" rel="sponsored noreferrer">OPEN BLIBLI ROUTE <ExternalLink size={18}/></a>
-          <p className="affiliate-note">Affiliate route maintained by Skill Fusion.</p>
+          <div className="detail-price-box">
+            <span>BLIBLI CHECKOUT DATA</span>
+            <strong>OPEN BLIBLI</strong>
+            <small>Harga, diskon, stok, varian, dan detail penawaran terbaru dilihat langsung di halaman Blibli.</small>
+          </div>
+
+          <a className="detail-buy-button mech-button primary" href={product.affiliateUrl} target="_blank" rel="sponsored noreferrer">CHECK ON BLIBLI <ExternalLink size={18}/></a>
+          <p className="affiliate-note">Skill Fusion menampilkan data katalog yang tersedia dan mengarahkan transaksi ke Blibli.</p>
         </div>
       </section>
 
