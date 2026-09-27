@@ -30,7 +30,7 @@ export function useSyncedProducts(initialProducts:Product[]=fallbackProducts){
     }
 
     sync();
-    const timer=window.setInterval(sync,30000);
+    const timer=window.setInterval(sync,5000);
     const onVisible=()=>{if(document.visibilityState==="visible") sync()};
     document.addEventListener("visibilitychange",onVisible);
 
