@@ -43,8 +43,11 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:4,time:new Date().toISOString()};
-    else if(action==='catalog') out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:5,time:new Date().toISOString()};
+    else if(action==='catalog'){
+      try{ensurePriceRefreshTrigger_()}catch(triggerError){}
+      out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
+    }
     else if(action==='price') out=publicPrice_(String(p.id||''));
     else throw new Error('Operasi Admin wajib menggunakan POST');
   }catch(err){out={ok:false,message:String(err.message||err)}}
@@ -466,6 +469,62 @@ function fetchJsonFast_(url,referer){
   }
   return null;
 }
+function fetchTextFast_(url){
+  const uas=[PRODUCT_FETCH_UAS[0],PRODUCT_FETCH_UAS[1]];
+  for(let i=0;i<uas.length;i++){
+    try{
+      const r=UrlFetchApp.fetch(url,{
+        muteHttpExceptions:true,
+        followRedirects:true,
+        headers:{
+          Accept:'text/html,application/xhtml+xml',
+          'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+          'Cache-Control':'no-cache',
+          Pragma:'no-cache',
+          'User-Agent':uas[i]
+        }
+      });
+      if(r.getResponseCode()<200||r.getResponseCode()>=400)continue;
+      const body=r.getContentText();
+      if(body)return body;
+    }catch(e){}
+  }
+  return '';
+}
+function selectedVariantPagePrice_(p){
+  const id=String(p&&p.id||'').trim();
+  if(!id)return {price:'',currency:''};
+
+  const baseId=id.replace(/-\d{5}$/,'');
+  let page=String(p.canonicalUrl||p.affiliateUrl||'');
+  try{
+    const u=new URL(page);
+    if(/\/is--[^/?#]+$/i.test(u.pathname)){
+      u.pathname=u.pathname.replace(/\/is--[^/?#]+$/i,'/ps--'+baseId);
+    }else if(!/\/ps--[^/?#]+$/i.test(u.pathname)){
+      return {price:'',currency:''};
+    }
+    u.search='';
+    u.searchParams.set('defaultItemSku',id);
+    u.searchParams.set('cnc','false');
+    page=u.toString();
+  }catch(e){
+    return {price:'',currency:''};
+  }
+
+  const html=fetchTextFast_(page);
+  if(!html)return {price:'',currency:''};
+
+  const price=extractHtmlPrice_(html);
+  if(!price)return {price:'',currency:''};
+
+  const currency=pick_(html,[
+    /<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,
+    /"priceCurrency"\s*:\s*"([^"]+)"/i
+  ])||'IDR';
+
+  return {price:price,currency:String(currency).toUpperCase()};
+}
 function fastSummaryPrice_(p){
   const id=String(p&&p.id||'').trim();
   if(!id)return {price:'',currency:''};
@@ -712,7 +771,7 @@ function extractHtmlPrice_(html){
   const value=decodeHtml_(html||'');
   let raw=pick_(value,[
     /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
-    /"(?:finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
+    /"(?:listed|listedPrice|finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
     /"(?:formattedPrice|formattedValue|displayPrice|priceDisplay)"\s*:\s*"Rp\s*([0-9][0-9.,]*)"/i,
     /(?:^|[>\s])Rp\s*([0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?)(?:[<\s]|$)/i
   ]);
@@ -778,28 +837,40 @@ function refreshPriceForProduct_(p){
   // catalogue and reads the same price object used by the product page.
   let priceData=fastSummaryPrice_(p);
 
-  // Fallback only if exact SKU summary does not expose a price.
+  let priceSource=priceData.price?'summary':'';
+
+  // Blibli's public product page is often server-rendered even when _summary is
+  // blocked for Apps Script. Request the exact selected SKU via defaultItemSku.
   if(!priceData.price){
-    priceData=searchPriceData_(p.id,p.name,p.canonicalUrl||p.affiliateUrl);
+    priceData=selectedVariantPagePrice_(p);
+    if(priceData.price)priceSource='variant-page';
   }
 
-  // Final fallback: PDP HTML.
+  // Search API is only a fallback and still requires an exact/base SKU match.
   if(!priceData.price){
-    const html=fetchText_(p.canonicalUrl||p.affiliateUrl);
+    priceData=searchPriceData_(p.id,p.name,p.canonicalUrl||p.affiliateUrl);
+    if(priceData.price)priceSource='search';
+  }
+
+  // Final fallback: direct PDP HTML.
+  if(!priceData.price){
+    const html=fetchTextFast_(p.canonicalUrl||p.affiliateUrl);
     priceData={
       price:extractHtmlPrice_(html),
       currency:pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||''
     };
+    if(priceData.price)priceSource='pdp';
   }
 
   const price=normalizePrice_(priceData.price);
-  if(!price)return p;
+  if(!price)return Object.assign({},p,{lastPriceSource:'empty'});
 
   return Object.assign({},p,{
     price:price,
     currency:String(priceData.currency||p.currency||'IDR').toUpperCase(),
     priceUpdatedAt:new Date().toISOString(),
-    source:'live-price'
+    source:'live-price',
+    lastPriceSource:priceSource||'unknown'
   });
 }
 function publicPrice_(id){
@@ -830,10 +901,12 @@ function publicPrice_(id){
       upsert_(DRAFT_SHEET,fresh);
       upsert_(PUBLISHED_SHEET,fresh);
       SpreadsheetApp.flush();
+      log_('PRICE_LOOKUP',id,'OK',(fresh.lastPriceSource||'unknown')+' · '+fresh.price+' '+(fresh.currency||'IDR'));
     }else{
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
+      log_('PRICE_LOOKUP',id,'EMPTY','summary/variant/search/PDP tidak mengembalikan harga');
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
