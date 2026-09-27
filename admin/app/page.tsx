@@ -1393,7 +1393,7 @@ export default function AdminPage(){
             <span><strong>Remember me</strong><small>Simpan login di perangkat ini sampai Anda logout.</small></span>
           </label>
           {loginError&&<div className="admin-login-error">{loginError}</div>}
-          {(showBackendSettings||loginError)&&<div className="admin-backend-recovery">
+          {showBackendSettings&&<div className="admin-backend-recovery">
             <div className="admin-backend-recovery-head">
               <div>
                 <strong>Koneksi Apps Script</strong>
