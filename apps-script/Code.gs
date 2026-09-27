@@ -3,7 +3,7 @@ const DRAFT_SHEET = 'Draft';
 const PUBLISHED_SHEET = 'Published';
 const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
-const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt'];
+const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt','pickupPointCode'];
 
 const PRODUCT_FETCH_UAS = [
   'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)',
@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:5,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:6,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -85,7 +85,7 @@ function validBlibliUrl_(url){
   if(!/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value))throw new Error('URL harus HTTPS Blibli');
   return value;
 }
-function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,description:p.description||null}}
+function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,description:p.description||null,priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null}}
 function resolveProduct_(url){
   validBlibliUrl_(url);
 
@@ -108,7 +108,8 @@ function resolveProduct_(url){
     features:[],
     price:'',
     currency:'',
-    description:''
+    description:'',
+    pickupPointCode:''
   };
 
   const p=reloadFromBlibli_(seed);
@@ -177,6 +178,9 @@ function savePublish_(request){
     if(current&&!cleanDescription_(p.description||'')&&cleanDescription_(current.description||'')){
       p.description=current.description;
     }
+    if(current&&!String(p.pickupPointCode||'').trim()&&String(current.pickupPointCode||'').trim()){
+      p.pickupPointCode=current.pickupPointCode;
+    }
 
     p.sequence=current?current.sequence:++sequence;
   });
@@ -241,10 +245,10 @@ function rowToProduct_(r){
   let images=[],features=[];
   try{images=JSON.parse(r[6]||'[]')}catch(e){}
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
-  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||'')};
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||'')};
 }
 function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
-function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||''].map(safeCell_)}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||'',p.pickupPointCode||''].map(safeCell_)}
 function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
 function findRow_(name,id){const s=sheet_(name);if(s.getLastRow()<2)return -1;const v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
 function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
@@ -289,6 +293,7 @@ function reloadFromBlibli_(p){
   if(p.id&&id!==p.id)throw new Error('Product ID berubah; data lama dipertahankan');
 
   const pricingUrl=productId_(resolved.finalUrl||'')?(resolved.finalUrl||canonical):canonical;
+  const pickupPointCode=pickupPointCode_(pricingUrl)||p.pickupPointCode||'';
   const html=fetchText_(pricingUrl);
   let title=pick_(html,[/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,/<title[^>]*>([^<]+)<\/title>/i])||p.name;
 
@@ -329,7 +334,7 @@ function reloadFromBlibli_(p){
   ]);
   const description=cleanDescription_(summary.description||htmlDescription||p.description||'');
   if(!isUsableProductTitle_(title))title=p.name;
-  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,priceUpdatedAt:priceUpdatedAt,source:'blibli-reload'});
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
 function resolveUrl_(url){
   let current=url,html='';
@@ -404,6 +409,15 @@ function resolveUrl_(url){
 
   const candidate=productId_(canonical||'')?canonical:current;
   return {finalUrl:current,canonical:canonicalProductUrl_(candidate||url)};
+}
+function pickupPointCode_(value){
+  try{
+    const u=new URL(String(value||''));
+    return String(u.searchParams.get('pickupPointCode')||'').trim();
+  }catch(e){
+    const m=String(value||'').match(/[?&]pickupPointCode=([^&#]+)/i);
+    return m&&m[1]?decodeURIComponent(m[1]):'';
+  }
 }
 function absoluteUrl_(base,loc){
   if(/^https?:\/\//i.test(loc))return loc;
@@ -507,6 +521,7 @@ function selectedVariantPagePrice_(p){
     u.search='';
     u.searchParams.set('defaultItemSku',id);
     u.searchParams.set('cnc','false');
+    if(p.pickupPointCode)u.searchParams.set('pickupPointCode',String(p.pickupPointCode));
     page=u.toString();
   }catch(e){
     return {price:'',currency:''};
@@ -527,20 +542,37 @@ function selectedVariantPagePrice_(p){
 }
 function fastSummaryPrice_(p){
   const id=String(p&&p.id||'').trim();
-  if(!id)return {price:'',currency:''};
+  if(!id)return {price:'',currency:'',pickupPointCode:p&&p.pickupPointCode||''};
 
   const referer=String(p.canonicalUrl||p.affiliateUrl||'https://www.blibli.com/');
+  let pickupPointCode=String(p.pickupPointCode||'').trim();
+
+  // Blibli's price object is location-aware. Existing products imported before
+  // this field was stored can recover the pickup point once from the affiliate
+  // redirect, then persist it for all later lookups.
+  if(!pickupPointCode&&p.affiliateUrl){
+    try{
+      const resolved=resolveUrl_(validBlibliUrl_(p.affiliateUrl));
+      pickupPointCode=pickupPointCode_(resolved.finalUrl||'');
+    }catch(e){}
+  }
+
+  const pickupQuery=pickupPointCode?'pickupPointCode='+encodeURIComponent(pickupPointCode):'';
   const endpoints=[
-    'https://www.blibli.com/backend/product-detail/products/is--'+encodeURIComponent(id)+'/_summary'
+    'https://www.blibli.com/backend/product-detail/products/is--'+
+    encodeURIComponent(id)+
+    '/_summary'+
+    (pickupQuery?'?'+pickupQuery:'')
   ];
 
   const productSku=id.replace(/-\d{5}$/,'');
   if(productSku!==id){
-    endpoints.push(
+    let url=
       'https://www.blibli.com/backend/product-detail/products/ps--'+
       encodeURIComponent(productSku)+
-      '/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false'
-    );
+      '/_summary?defaultItemSku='+encodeURIComponent(id)+'&cnc=false';
+    if(pickupQuery)url+='&'+pickupQuery;
+    endpoints.push(url);
   }
 
   for(let i=0;i<endpoints.length;i++){
@@ -550,10 +582,10 @@ function fastSummaryPrice_(p){
     let priceData=extractSummaryPrice_(data);
     if(!priceData.price)priceData=extractSerializedPrice_(JSON.stringify(data));
     const price=normalizePrice_(priceData.price);
-    if(price)return {price:price,currency:priceData.currency||'IDR'};
+    if(price)return {price:price,currency:priceData.currency||'IDR',pickupPointCode:pickupPointCode};
   }
 
-  return {price:'',currency:''};
+  return {price:'',currency:'',pickupPointCode:pickupPointCode};
 }
 function summaryData_(canonical,id,contextUrl){
   let pickupPointCode='';
@@ -836,6 +868,8 @@ function refreshPriceForProduct_(p){
   // Fast path: exact SKU _summary. This avoids searching the full Blibli
   // catalogue and reads the same price object used by the product page.
   let priceData=fastSummaryPrice_(p);
+  const recoveredPickupPointCode=String(priceData.pickupPointCode||p.pickupPointCode||'').trim();
+  if(recoveredPickupPointCode&&!p.pickupPointCode)p=Object.assign({},p,{pickupPointCode:recoveredPickupPointCode});
 
   let priceSource=priceData.price?'summary':'';
 
@@ -870,6 +904,7 @@ function refreshPriceForProduct_(p){
     currency:String(priceData.currency||p.currency||'IDR').toUpperCase(),
     priceUpdatedAt:new Date().toISOString(),
     source:'live-price',
+    pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
     lastPriceSource:priceSource||'unknown'
   });
 }
@@ -903,10 +938,15 @@ function publicPrice_(id){
       SpreadsheetApp.flush();
       log_('PRICE_LOOKUP',id,'OK',(fresh.lastPriceSource||'unknown')+' · '+fresh.price+' '+(fresh.currency||'IDR'));
     }else{
+      if(fresh.pickupPointCode&&fresh.pickupPointCode!==cached.pickupPointCode){
+        upsert_(DRAFT_SHEET,fresh);
+        upsert_(PUBLISHED_SHEET,fresh);
+        SpreadsheetApp.flush();
+      }
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','summary/variant/search/PDP tidak mengembalikan harga');
+      log_('PRICE_LOOKUP',id,'EMPTY','pickup='+(fresh.pickupPointCode||'-')+' · summary/variant/search/PDP tidak mengembalikan harga');
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
