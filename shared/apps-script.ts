@@ -1,16 +1,62 @@
-export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwEaWGv8ykfHPDqI4eUAp0U9FqYWeMb3RsS57K9QDsxnvbOI9h0HArIVASgn2llUZqaNQ/exec";
+export const DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwEaWGv8ykfHPDqI4eUAp0U9FqYWeMb3RsS57K9QDsxnvbOI9h0HArIVASgn2llUZqaNQ/exec";
+export const APPS_SCRIPT_URL_STORAGE_KEY = "skillfusion:apps-script-url";
 
-// Simple POST avoids a preflight and keeps the admin key out of URLs/JSONP.
+function normalizeAppsScriptUrl(value:string){
+  const url=String(value||"").trim();
+  if(!url) return "";
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec(?:[?#].*)?$/i.test(url)){
+    throw new Error("URL Apps Script harus berupa URL Web App /exec yang aktif.");
+  }
+  const parsed=new URL(url);
+  parsed.search="";
+  parsed.hash="";
+  return parsed.toString();
+}
+
+export function getAppsScriptUrl(){
+  if(typeof window!=="undefined"){
+    const stored=window.localStorage.getItem(APPS_SCRIPT_URL_STORAGE_KEY);
+    if(stored){
+      try{return normalizeAppsScriptUrl(stored)}catch{}
+    }
+
+    const runtime=(window as any).SKILL_FUSION_CONFIG?.APPS_SCRIPT_URL;
+    if(runtime){
+      try{return normalizeAppsScriptUrl(String(runtime))}catch{}
+    }
+  }
+  return DEFAULT_APPS_SCRIPT_URL;
+}
+
+export function setAppsScriptUrl(value:string){
+  const url=normalizeAppsScriptUrl(value);
+  if(typeof window!=="undefined") window.localStorage.setItem(APPS_SCRIPT_URL_STORAGE_KEY,url);
+  return url;
+}
+
+export function resetAppsScriptUrl(){
+  if(typeof window!=="undefined") window.localStorage.removeItem(APPS_SCRIPT_URL_STORAGE_KEY);
+}
+
+function connectionError(message:string,code:string){
+  const error=new Error(message) as Error&{code?:string};
+  error.code=code;
+  return error;
+}
+
+// Public reads use JSONP because Google Apps Script ContentService redirects
+// through script.googleusercontent.com and mobile browsers can reject CORS.
 function requestAppsScriptJsonp(action:string,payload:Record<string,unknown>={}){
   return new Promise<any>((resolve,reject)=>{
     if(typeof window==="undefined"||typeof document==="undefined"){
-      reject(new Error("JSONP hanya tersedia di browser"));
+      reject(connectionError("JSONP hanya tersedia di browser","BROWSER_REQUIRED"));
       return;
     }
 
     const callback="__skillFusion_"+Date.now()+"_"+Math.random().toString(36).slice(2);
     const script=document.createElement("script");
-    const url=new URL(APPS_SCRIPT_URL);
+    const endpoint=getAppsScriptUrl();
+    const url=new URL(endpoint);
 
     url.searchParams.set("action",action);
     Object.entries(payload).forEach(([name,value])=>{
@@ -28,7 +74,7 @@ function requestAppsScriptJsonp(action:string,payload:Record<string,unknown>={})
     (window as any)[callback]=(data:any)=>{
       cleanup();
       if(!data?.ok){
-        reject(new Error(data?.message||"Koneksi Apps Script gagal"));
+        reject(connectionError(data?.message||"Koneksi Apps Script gagal",data?.code||"APPS_SCRIPT_ERROR"));
         return;
       }
       resolve(data);
@@ -36,12 +82,15 @@ function requestAppsScriptJsonp(action:string,payload:Record<string,unknown>={})
 
     script.onerror=()=>{
       cleanup();
-      reject(new Error("Apps Script tidak dapat dijangkau"));
+      reject(connectionError(
+        "Apps Script tidak dapat dijangkau. Periksa URL Web App /exec yang aktif.",
+        "APPS_SCRIPT_UNREACHABLE"
+      ));
     };
 
     const timer=window.setTimeout(()=>{
       cleanup();
-      reject(new Error("Apps Script timeout"));
+      reject(connectionError("Apps Script timeout. Periksa deployment Web App.","APPS_SCRIPT_TIMEOUT"));
     },action==="price"?15000:30000);
 
     script.src=url.toString();
@@ -53,24 +102,32 @@ function requestAppsScriptJsonp(action:string,payload:Record<string,unknown>={})
 function appsScriptHtmlError(text:string,status:number,url:string){
   const value=String(text||"");
   if(/accounts\.google\.com|ServiceLogin|Sign in with Google|Masuk.*Google/i.test(value)){
-    return new Error("Web App Apps Script meminta login Google. Pada deployment, set 'Who has access' ke 'Anyone', lalu deploy ulang.");
+    return connectionError(
+      "Web App Apps Script meminta login Google. Set deployment 'Who has access' ke 'Anyone'.",
+      "APPS_SCRIPT_PRIVATE"
+    );
   }
   if(status===404||/Page Not Found|file you have requested does not exist/i.test(value)){
-    return new Error("URL Web App Apps Script tidak aktif atau deployment sudah diganti. Gunakan URL /exec dari deployment aktif.");
+    return connectionError(
+      "URL Web App Apps Script tidak aktif atau deployment sudah diganti. Masukkan URL /exec dari deployment aktif.",
+      "APPS_SCRIPT_URL_INACTIVE"
+    );
   }
   if(/Authorization is required|You need permission|access denied/i.test(value)){
-    return new Error("Akses Web App Apps Script belum publik. Ubah akses deployment menjadi 'Anyone'.");
+    return connectionError(
+      "Akses Web App Apps Script belum publik. Ubah akses deployment menjadi 'Anyone'.",
+      "APPS_SCRIPT_PRIVATE"
+    );
   }
-  return new Error("Apps Script merespons halaman non-JSON. Deployment Web App ada, tetapi akses/URL deployment perlu diperiksa.");
+  return connectionError(
+    "Apps Script merespons halaman non-JSON. Periksa URL dan akses deployment Web App.",
+    "APPS_SCRIPT_NON_JSON"
+  );
 }
 
 export async function requestAppsScript(action:string, payload:Record<string,unknown>={}, key?:string){
   const isPublicGet=action==="catalog"||action==="health"||action==="price";
 
-  // Google Apps Script ContentService redirects GET responses to
-  // script.googleusercontent.com. Some mobile browsers reject that redirect
-  // during cross-origin fetch, so public reads use JSONP instead. Code.gs
-  // already supports callback= and returns application/javascript.
   if(isPublicGet&&typeof window!=="undefined"){
     return requestAppsScriptJsonp(action,payload);
   }
@@ -78,7 +135,8 @@ export async function requestAppsScript(action:string, payload:Record<string,unk
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),action==="price"?15000:90000);
   try{
-    const url=new URL(APPS_SCRIPT_URL);
+    const endpoint=getAppsScriptUrl();
+    const url=new URL(endpoint);
     let options:RequestInit={signal:controller.signal,redirect:"follow",credentials:"omit"};
 
     if(isPublicGet){
@@ -96,7 +154,16 @@ export async function requestAppsScript(action:string, payload:Record<string,unk
       };
     }
 
-    const response=await globalThis.fetch(url.toString(),options);
+    let response:Response;
+    try{
+      response=await globalThis.fetch(url.toString(),options);
+    }catch(error){
+      if(error instanceof DOMException&&error.name==="AbortError"){
+        throw connectionError("Apps Script timeout. Periksa deployment Web App.","APPS_SCRIPT_TIMEOUT");
+      }
+      throw connectionError("Apps Script tidak dapat dijangkau. Periksa URL Web App /exec yang aktif.","APPS_SCRIPT_UNREACHABLE");
+    }
+
     const text=await response.text();
     let data;
     try{
@@ -109,7 +176,7 @@ export async function requestAppsScript(action:string, payload:Record<string,unk
       if(data?.code==="UNAUTHORIZED"&&typeof window!=="undefined"){
         window.sessionStorage.removeItem("skillfusion:admin-key");
       }
-      throw new Error(data?.message||"Koneksi Apps Script gagal");
+      throw connectionError(data?.message||"Koneksi Apps Script gagal",data?.code||"APPS_SCRIPT_ERROR");
     }
 
     return data;
