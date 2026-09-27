@@ -1,0 +1,30 @@
+name: Blibli Browser Smoke
+
+on:
+  pull_request:
+    paths:
+      - "scripts/scrape-blibli-smoke.mjs"
+      - ".github/workflows/blibli-browser-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright
+        run: |
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Scrape one Blibli product
+        env:
+          CATALOG_URL: "https://script.google.com/macros/s/AKfycbwEaWGv8ykfHPDqI4eUAp0U9FqYWeMb3RsS57K9QDsxnvbOI9h0HArIVASgn2llUZqaNQ/exec?action=catalog"
+          OUTPUT_PATH: "site/data/blibli-smoke.json"
+        run: node scripts/scrape-blibli-smoke.mjs
