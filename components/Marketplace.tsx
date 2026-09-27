@@ -96,7 +96,7 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
         <div className="hero-copy">
           <div className="hero-kicker"><span className="bracket">[</span> CURATED TECHNOLOGY INTELLIGENCE <span className="bracket">]</span></div>
           <h1 className="hero-title"><span className="hero-title-line hero-title-primary">SMART TECH</span><span className="hero-title-line hero-title-secondary">BETTER SIGNAL</span></h1>
-          <p>Skill Fusion menyaring gadget dan teknologi yang layak dipertimbangkan—dengan katalog ringkas, foto produk lengkap, dan jalur langsung ke penawaran affiliate.</p>
+          <p>Skill Fusion menyaring gadget dan teknologi yang layak dipertimbangkan—dengan identitas produk, foto katalog, fitur utama, dan jalur langsung ke halaman affiliate Blibli.</p>
           <div className="identity-strip">
             <div><small>OWNER</small><a href={IG_OWNER} target="_blank" rel="noreferrer">@wilie_jonathan</a></div>
             <div><small>BRAND CHANNEL</small><a href={IG_BRAND} target="_blank" rel="noreferrer">@skill.fusion.id</a></div>
@@ -122,7 +122,7 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
 
       <section className="catalog-section" id="catalog">
         <div className="catalog-heading">
-          <div><span className="eyebrow">PRODUCT MATRIX</span><h2>Featured Tech</h2><p>Card dapat diklik untuk membuka product detail, gallery besar, dan route affiliate.</p></div>
+          <div><span className="eyebrow">PRODUCT MATRIX</span><h2>Featured Tech</h2><p>Card dapat diklik untuk membuka detail katalog, gallery besar, dan route affiliate Blibli.</p></div>
           <div className="catalog-counter"><span>RESULT</span><strong>{String(filtered.length).padStart(2,"0")}</strong></div>
         </div>
 
@@ -130,7 +130,7 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
           <aside className="filter-sidebar">{filters}</aside>
           <div className="catalog">
             <div className="catalog-toolbar">
-              <div><span className="catalog-status"><i className="pulse-dot"/> LIVE CATALOG{lastSync?" · SYNCED":""}</span></div>
+              <div><span className="catalog-status"><i className="pulse-dot"/> CATALOG ONLINE{lastSync?" · SYNCED":""}</span></div>
               <button className="filter-trigger" onClick={()=>setMobileFilters(true)}><Filter size={17}/>Filter</button>
             </div>
             {filtered.length?<div className="product-grid">{filtered.map(p=><ProductCard key={p.id} product={p} wished={wishlist.includes(p.id)} onWishlist={toggleWishlist}/>)}</div>:<div className="empty-state"><span>NO SIGNAL</span><h3>Produk tidak ditemukan.</h3><p>Coba keyword lain.</p><button onClick={()=>{setQuery("");setCategory("Semua")}}>RESET MATRIX</button></div>}
@@ -143,7 +143,7 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
         <div>
           <span className="eyebrow">SKILL FUSION / PERSONAL BRAND</span>
           <h2>Technology discovery with a sharper point of view.</h2>
-          <p>Built around curated tech, clean product intelligence, and affiliate routing for Indonesia.</p>
+          <p>Built around curated tech, clean product curation, and affiliate routing for Indonesia.</p>
         </div>
         <div className="banner-socials">
           <a href={IG_OWNER} target="_blank" rel="noreferrer"><span>OWNER</span><strong>@wilie_jonathan</strong><ArrowRight size={17}/></a>
