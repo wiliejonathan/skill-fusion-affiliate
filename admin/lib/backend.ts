@@ -56,6 +56,9 @@ export async function backendFetch(input:string,init:RequestInit={}){
     payload={url:url.searchParams.get("url")};
   }else if(url.pathname==="/api/repair-images"){
     action="repairMissingImages";
+  }else if(url.pathname==="/api/import-job"){
+    action=method==="POST"?"importStart":"importStatus";
+    if(method==="POST") payload=JSON.parse(String(init.body||"{}"));
   }else throw new Error("API tidak dikenal");
 
   try{
