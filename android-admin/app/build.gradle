@@ -17,7 +17,9 @@ android {
     buildTypes {
         debug {
             debuggable true
-        }        release {
+        }
+
+        release {
             minifyEnabled false
             shrinkResources false
         }
