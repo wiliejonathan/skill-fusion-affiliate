@@ -1,8 +1,16 @@
-import {requestAppsScript} from "../../shared/apps-script";
+import {getAppsScriptUrl,requestAppsScript,setAppsScriptUrl} from "../../shared/apps-script";
 
 const SESSION_KEY="skillfusion:admin-key";
 const REMEMBER_KEY="skillfusion:adminKey";
 let adminKey:string|undefined;
+
+export function getAdminAppsScriptUrl(){
+  return getAppsScriptUrl();
+}
+
+export function setAdminAppsScriptUrl(url:string){
+  return setAppsScriptUrl(url);
+}
 
 export function getStoredAdminKey(){
   if(typeof window==="undefined") return undefined;

@@ -1,13 +1,32 @@
 "use client";
 
 import {requestAppsScript} from "../shared/apps-script";
-import {useEffect,useState} from "react";
-import {products as fallbackProducts,type Product} from "@/lib/products";
+import {useEffect,useMemo,useState} from "react";
+import snapshot from "@/lib/catalog-snapshot.json";
+import {products as legacyFallback,type Product} from "@/lib/products";
 
-export function useSyncedProducts(initialProducts:Product[]=fallbackProducts){
-  const [products,setProducts]=useState<Product[]>(initialProducts.length?initialProducts:fallbackProducts);
+const snapshotProducts=snapshot as Product[];
+
+function bestFallback(initialProducts:Product[]){
+  const candidates=[
+    Array.isArray(initialProducts)?initialProducts:[],
+    snapshotProducts,
+    legacyFallback
+  ];
+  return candidates.reduce<Product[]>((best,current)=>current.length>best.length?current:best,[]);
+}
+
+export function useSyncedProducts(initialProducts:Product[]=snapshotProducts){
+  const fallback=useMemo(()=>bestFallback(initialProducts),[initialProducts]);
+  const [products,setProducts]=useState<Product[]>(fallback);
   const [lastSync,setLastSync]=useState<number|null>(null);
   const [bridgeReady,setBridgeReady]=useState(false);
+
+  useEffect(()=>{
+    if(fallback.length>products.length) setProducts(fallback);
+    // Only react to a materially better fallback; live catalog remains authoritative.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[fallback.length]);
 
   useEffect(()=>{
     let mounted=true;
@@ -19,19 +38,24 @@ export function useSyncedProducts(initialProducts:Product[]=fallbackProducts){
       try{
         const data=await requestAppsScript("catalog");
         if(!mounted) return;
-        if(data?.ok&&Array.isArray(data.products)){
+        if(data?.ok&&Array.isArray(data.products)&&data.products.length){
           setProducts(data.products);
           setLastSync(Date.now());
         }
         setBridgeReady(true);
       }catch{
-        if(mounted) setBridgeReady(true);
+        if(mounted){
+          // Keep the full static snapshot instead of collapsing to the five
+          // legacy demo products when the Apps Script deployment is replaced.
+          setProducts(current=>current.length>=fallback.length?current:fallback);
+          setBridgeReady(true);
+        }
       }finally{pending=false;}
     }
 
-    sync();
+    void sync();
     const timer=window.setInterval(sync,5000);
-    const onVisible=()=>{if(document.visibilityState==="visible") sync()};
+    const onVisible=()=>{if(document.visibilityState==="visible") void sync()};
     document.addEventListener("visibilitychange",onVisible);
 
     return ()=>{
@@ -39,7 +63,7 @@ export function useSyncedProducts(initialProducts:Product[]=fallbackProducts){
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange",onVisible);
     };
-  },[]);
+  },[fallback]);
 
   return {products,bridgeReady,lastSync};
 }

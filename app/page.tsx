@@ -1,3 +1,7 @@
 import Marketplace from "@/components/Marketplace";
-import {products} from "@/lib/products";
-export default function Home(){return <Marketplace initialProducts={products}/>;}
+import snapshot from "@/lib/catalog-snapshot.json";
+import type {Product} from "@/lib/products";
+
+export default function Home(){
+  return <Marketplace initialProducts={snapshot as Product[]}/>;
+}
