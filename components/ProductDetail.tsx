@@ -21,6 +21,8 @@ export default function ProductDetail({product}:{product:Product}){
   const [lightbox,setLightbox]=useState(false);
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const [livePrice,setLivePrice]=useState({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:false});
+  const [liveDescription,setLiveDescription]=useState(String(product.description||"").trim());
+  const [liveVariants,setLiveVariants]=useState(product.variants||[]);
   const images=product.images||[];
   const count=images.length;
   const formattedPrice=useMemo(()=>{
@@ -33,12 +35,14 @@ export default function ProductDetail({product}:{product:Product}){
     }
     return `${livePrice.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
   },[livePrice.price,livePrice.currency]);
-  const description=String(product.description||"").trim()||
+  const description=liveDescription||
     `${product.name} adalah produk ${product.category.toLowerCase()} dari ${product.brand}. ${product.features.length?`Fitur utama: ${product.features.join(", ")}.`:""}`;
 
   useEffect(()=>{
     let mounted=true;
     setLivePrice({price:product.price||null,currency:product.currency||null,updatedAt:product.priceUpdatedAt||null,loading:true});
+    setLiveDescription(String(product.description||"").trim());
+    setLiveVariants(product.variants||[]);
 
     async function refreshLivePrice(attempt=0){
       try{
@@ -52,6 +56,8 @@ export default function ProductDetail({product}:{product:Product}){
           updatedAt:data?.priceUpdatedAt||product.priceUpdatedAt||null,
           loading:false
         });
+        if(data?.description) setLiveDescription(String(data.description).trim());
+        if(Array.isArray(data?.variants)&&data.variants.length) setLiveVariants(data.variants);
 
         // Blibli occasionally returns an empty/blocked response on the first hit.
         // Retry once after the short backend throttle instead of leaving the user
@@ -197,6 +203,18 @@ export default function ProductDetail({product}:{product:Product}){
             <h2>PRODUCT DESCRIPTION</h2>
             <p>{description}</p>
           </div>
+
+          {liveVariants.length?<div className="detail-variants">
+            <h2>PRODUCT VARIANTS</h2>
+            <div className="detail-variant-groups">
+              {liveVariants.map((group)=>(
+                <div className="detail-variant-group" key={group.name}>
+                  <strong>{group.name}</strong>
+                  <div>{group.values.map(value=><span key={group.name+"-"+value}>{value}</span>)}</div>
+                </div>
+              ))}
+            </div>
+          </div>:null}
 
           <div className="detail-specs">
             <h2>PRODUCT SIGNALS</h2>
