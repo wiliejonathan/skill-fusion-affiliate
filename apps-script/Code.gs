@@ -3,7 +3,7 @@ const DRAFT_SHEET = 'Draft';
 const PUBLISHED_SHEET = 'Published';
 const CONFIG_SHEET = 'Config';
 const LOG_SHEET = 'Logs';
-const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt','pickupPointCode'];
+const HEADERS = ['sequence','id','canonicalProductId','name','brand','category','images_json','affiliateUrl','canonicalUrl','badge','features_json','price','currency','updatedAt','source','description','priceUpdatedAt','pickupPointCode','variants_json'];
 
 const PRODUCT_FETCH_UAS = [
   'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322)',
@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:6,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:7,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -85,7 +85,7 @@ function validBlibliUrl_(url){
   if(!/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(value))throw new Error('URL harus HTTPS Blibli');
   return value;
 }
-function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,description:p.description||null,priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null}}
+function resolvedShape_(p,input){return {ok:true,inputUrl:input,finalUrl:p.canonicalUrl,canonicalUrl:p.canonicalUrl,canonicalProductId:p.id,title:p.name,image:p.images[0]||null,images:p.images,price:p.price||null,currency:p.currency||null,description:p.description||null,priceUpdatedAt:p.priceUpdatedAt||null,pickupPointCode:p.pickupPointCode||null,variants:Array.isArray(p.variants)?p.variants:[]}}
 function resolveProduct_(url){
   validBlibliUrl_(url);
 
@@ -109,7 +109,8 @@ function resolveProduct_(url){
     price:'',
     currency:'',
     description:'',
-    pickupPointCode:''
+    pickupPointCode:'',
+    variants:[]
   };
 
   const p=reloadFromBlibli_(seed);
@@ -137,7 +138,7 @@ function validateProduct_(p){
   validBlibliUrl_(p.affiliateUrl);
   if(p.canonicalUrl){validBlibliUrl_(p.canonicalUrl);if(productId_(p.canonicalUrl)!==id)throw new Error('Product ID tidak cocok dengan URL')}
   if(!Array.isArray(p.images)||p.images.some(x=>typeof x!=='string'||!/^https:\/\//i.test(x)))throw new Error('Foto produk tidak valid');
-  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim(),description:cleanDescription_(p.description||'')});
+  return Object.assign({},p,{id:id,canonicalProductId:id,features:Array.isArray(p.features)?p.features.map(String):[],images:unique_(p.images),name:String(p.name).trim(),description:cleanDescription_(p.description||''),variants:normalizeVariants_(p.variants||[])});
 }
 function savePublish_(request){
   const input=request.product?[request.product]:request.products;
@@ -180,6 +181,9 @@ function savePublish_(request){
     }
     if(current&&!String(p.pickupPointCode||'').trim()&&String(current.pickupPointCode||'').trim()){
       p.pickupPointCode=current.pickupPointCode;
+    }
+    if(current&&(!Array.isArray(p.variants)||!p.variants.length)&&Array.isArray(current.variants)&&current.variants.length){
+      p.variants=current.variants;
     }
 
     p.sequence=current?current.sequence:++sequence;
@@ -242,13 +246,14 @@ function requireAdmin_(key){const expected=config_().ADMIN_KEY;if(!expected||Str
 function log_(action,id,status,message){sheet_(LOG_SHEET).appendRow([new Date(),action,id||'',status,message||''])}
 
 function rowToProduct_(r){
-  let images=[],features=[];
+  let images=[],features=[],variants=[];
   try{images=JSON.parse(r[6]||'[]')}catch(e){}
   try{features=JSON.parse(r[10]||'[]')}catch(e){}
-  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||'')};
+  try{variants=JSON.parse(r[18]||'[]')}catch(e){}
+  return {sequence:Number(r[0])||0,id:String(r[1]||''),canonicalProductId:String(r[2]||r[1]||''),name:String(r[3]||''),brand:String(r[4]||''),category:String(r[5]||''),images:Array.isArray(images)?images:[],affiliateUrl:String(r[7]||''),canonicalUrl:String(r[8]||''),badge:String(r[9]||'Blibli Affiliate'),features:Array.isArray(features)?features:[],price:String(r[11]||''),currency:String(r[12]||''),description:String(r[15]||''),priceUpdatedAt:String(r[16]||''),pickupPointCode:String(r[17]||''),variants:Array.isArray(variants)?variants:[]};
 }
 function safeCell_(value){return typeof value==='string'&&/^[=+@-]/.test(value)?"'"+value:value}
-function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||'',p.pickupPointCode||''].map(safeCell_)}
+function productToRow_(p){return [p.sequence,p.id,p.canonicalProductId||p.id,p.name,p.brand,p.category,JSON.stringify(p.images||[]),p.affiliateUrl,p.canonicalUrl||'',p.badge||'Blibli Affiliate',JSON.stringify(p.features||[]),p.price||'',p.currency||'',new Date().toISOString(),p.source||'apps-script',p.description||'',p.priceUpdatedAt||'',p.pickupPointCode||'',JSON.stringify(p.variants||[])].map(safeCell_)}
 function readProducts_(name){const s=sheet_(name),v=s.getDataRange().getValues();if(v.length<2)return [];return v.slice(1).filter(r=>r[1]).map(rowToProduct_).sort((a,b)=>a.sequence-b.sequence)}
 function findRow_(name,id){const s=sheet_(name);if(s.getLastRow()<2)return -1;const v=s.getRange(2,1,Math.max(1,s.getLastRow()-1),HEADERS.length).getValues();for(let i=0;i<v.length;i++)if(String(v[i][1])===id)return i+2;return -1}
 function upsert_(name,p){const s=sheet_(name),row=findRow_(name,p.id),values=[productToRow_(p)];if(row>0)s.getRange(row,1,1,HEADERS.length).setValues(values);else s.getRange(s.getLastRow()+1,1,1,HEADERS.length).setValues(values)}
@@ -323,18 +328,24 @@ function reloadFromBlibli_(p){
   }
   const htmlPrice=extractHtmlPrice_(html);
   const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
-  const searchPrice=(!summary.price&&!htmlPrice)?searchPriceData_(id,title,canonical):{price:'',currency:''};
-  const freshPrice=normalizePrice_(summary.price||htmlPrice||searchPrice.price||'');
+  const seoData=seoProductPageData_(Object.assign({},p,{id:id,name:title,canonicalUrl:canonical,pickupPointCode:pickupPointCode}));
+  const searchPrice=(!summary.price&&!htmlPrice&&!seoData.price)?searchPriceData_(id,title,canonical):{price:'',currency:''};
+  const freshPrice=normalizePrice_(summary.price||htmlPrice||seoData.price||searchPrice.price||'');
   const price=normalizePrice_(freshPrice||p.price||'');
-  const currency=(summary.currency||htmlCurrency||searchPrice.currency||p.currency||(price?'IDR':'')).toUpperCase();
+  const currency=(summary.currency||htmlCurrency||seoData.currency||searchPrice.currency||p.currency||(price?'IDR':'')).toUpperCase();
   const priceUpdatedAt=freshPrice?new Date().toISOString():(p.priceUpdatedAt||'');
   const htmlDescription=pick_(html,[
     /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i
   ]);
-  const description=cleanDescription_(summary.description||htmlDescription||p.description||'');
+  const description=cleanDescription_(summary.description||seoData.description||htmlDescription||p.description||'');
+  const variants=normalizeVariants_(
+    (summary.variants&&summary.variants.length?summary.variants:null)||
+    (seoData.variants&&seoData.variants.length?seoData.variants:null)||
+    p.variants||[]
+  );
   if(!isUsableProductTitle_(title))title=p.name;
-  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
+  return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:inferBrand_(title,id),features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,description:description,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
 function resolveUrl_(url){
   let current=url,html='';
@@ -603,7 +614,7 @@ function summaryData_(canonical,id,contextUrl){
     endpoints.push(productUrl);
   }
 
-  let title='',images=[],price='',currency='',description='';
+  let title='',images=[],price='',currency='',description='',variants=[];
   endpoints.forEach(function(u){
     const j=fetchJson_(u,canonical);
     if(!j)return;
@@ -630,10 +641,13 @@ function summaryData_(canonical,id,contextUrl){
 
     const currentDescription=extractSummaryDescription_(data);
     if(currentDescription.length>description.length)description=currentDescription;
+
+    const currentVariants=extractSummaryVariants_(data);
+    if(currentVariants.length>variants.length)variants=currentVariants;
   });
 
   const ranked=rankProductImages_(images,id);
-  return {title:title,images:dominantBlibliGallery_(ranked),price:price,currency:currency,description:description};
+  return {title:title,images:dominantBlibliGallery_(ranked),price:price,currency:currency,description:description,variants:variants};
 }
 function decodeHtml_(s){return String(s||'').replace(/&amp;/g,'&').replace(/&#x2F;|&#47;/ig,'/').replace(/&quot;/g,'"').replace(/\\u002F/ig,'/').replace(/\\u003A/ig,':').replace(/\\u0026/ig,'&').replace(/\\u003D/ig,'=').replace(/\\\//g,'/')}
 function cleanDescription_(value){
@@ -702,6 +716,200 @@ function extractSummaryDescription_(value){
     return b.text.length-a.text.length;
   });
   return candidates[0].text;
+}
+function normalizeVariants_(value){
+  const groups=[];
+  const seen={};
+
+  function add(name,values){
+    const label=String(name||'Varian').replace(/\s+/g,' ').trim();
+    const list=unique_((values||[]).map(function(v){
+      if(v&&typeof v==='object')return String(v.name||v.label||v.value||v.text||'').trim();
+      return String(v||'').trim();
+    }).filter(function(v){
+      return v&&v.length<=80&&!/^(pilih|select|varian|variant|warna|color)$/i.test(v);
+    }));
+
+    if(!list.length)return;
+    const key=label.toLowerCase();
+    if(!seen[key]){
+      seen[key]=true;
+      groups.push({name:label,values:list.slice(0,30)});
+    }else{
+      const existing=groups.find(function(g){return g.name.toLowerCase()===key});
+      if(existing)existing.values=unique_(existing.values.concat(list)).slice(0,30);
+    }
+  }
+
+  if(Array.isArray(value)){
+    value.forEach(function(group){
+      if(!group)return;
+      if(typeof group==='string')add('Varian',[group]);
+      else if(typeof group==='object')add(group.name||group.label||group.type||group.attributeName||'Varian',group.values||group.options||group.items||group.variants||[]);
+    });
+  }
+
+  return groups.slice(0,12);
+}
+function extractSummaryVariants_(value){
+  const groups=[];
+
+  function maybeGroup(node,keyHint){
+    if(!node||typeof node!=='object')return;
+
+    const label=String(
+      node.name||node.label||node.title||node.attributeName||node.variantName||keyHint||''
+    ).trim();
+
+    const likely=/variant|variation|attribute|option|color|colour|warna|size|ukuran|kapasitas|storage|memory|ram/i.test(label+' '+String(keyHint||''));
+    if(!likely)return;
+
+    const raw=node.values||node.options||node.items||node.children||node.variants||node.variantValues;
+    if(Array.isArray(raw)){
+      const values=raw.map(function(v){
+        if(typeof v==='string'||typeof v==='number')return String(v);
+        if(v&&typeof v==='object')return String(v.name||v.label||v.value||v.text||v.displayName||'');
+        return '';
+      }).filter(Boolean);
+      if(values.length)groups.push({name:label||'Varian',values:values});
+    }
+  }
+
+  function visit(node,keyHint){
+    if(!node)return;
+    if(Array.isArray(node)){
+      node.forEach(function(item){visit(item,keyHint)});
+      return;
+    }
+    if(typeof node!=='object')return;
+
+    maybeGroup(node,keyHint);
+    Object.keys(node).forEach(function(key){
+      const child=node[key];
+
+      if(/^(color|colour|warna|size|ukuran)$/i.test(key)&&Array.isArray(child)){
+        groups.push({name:/warna|color|colour/i.test(key)?'Warna':key,values:child});
+      }
+
+      if(child&&typeof child==='object')visit(child,key);
+    });
+  }
+
+  visit(value,'');
+  return normalizeVariants_(groups);
+}
+function htmlToVisibleText_(html){
+  return decodeHtml_(html||'')
+    .replace(/<script[\s\S]*?<\/script>/ig,' ')
+    .replace(/<style[\s\S]*?<\/style>/ig,' ')
+    .replace(/<(?:br|\/p|\/div|\/li|\/button|\/section|\/h[1-6]|\/span)>/ig,'\n')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/ig,' ')
+    .replace(/&#39;|&apos;/ig,"'")
+    .replace(/&quot;/ig,'"')
+    .replace(/\r/g,'')
+    .replace(/[ \t]+/g,' ')
+    .replace(/\n[ \t]+/g,'\n')
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
+}
+function extractSeoDescription_(html,title){
+  const value=decodeHtml_(html||'');
+
+  const serialized=pick_(value,[
+    /"description"\s*:\s*"((?:\\.|[^"\\]){30,5000})"/i,
+    /"productDescription"\s*:\s*"((?:\\.|[^"\\]){30,5000})"/i
+  ]);
+  const serializedClean=cleanDescription_(serialized);
+  if(serializedClean&&!/online mall|belanja online/i.test(serializedClean))return serializedClean;
+
+  const text=htmlToVisibleText_(value);
+  const lower=text.toLowerCase();
+  let start=lower.indexOf('deskripsi produk');
+  if(start<0)start=lower.indexOf('deskripsi');
+  if(start<0)return '';
+
+  let block=text.slice(start);
+  const stopCandidates=['\nspesifikasi','\nulasan','\ndijual oleh','\nproduk serupa'];
+  let stop=block.length;
+  stopCandidates.forEach(function(marker){
+    const i=block.toLowerCase().indexOf(marker);
+    if(i>20&&i<stop)stop=i;
+  });
+  block=block.slice(0,stop)
+    .replace(/^deskripsi produk\s*/i,'')
+    .replace(/^deskripsi\s*/i,'')
+    .trim();
+
+  if(title){
+    const titleIndex=block.toLowerCase().indexOf(String(title).toLowerCase());
+    if(titleIndex>=0)block=block.slice(titleIndex+String(title).length).trim();
+  }
+
+  block=block
+    .replace(/^merk\s*:?\s*[A-Za-z0-9 ._-]+/i,'')
+    .replace(/^kategori\s*:?[^\n]+/i,'')
+    .trim();
+
+  return cleanDescription_(block);
+}
+function extractSeoVariants_(html){
+  const text=htmlToVisibleText_(html||'');
+  const groups=[];
+
+  [
+    {name:'Warna',re:/(?:^|\n)warna\s*:\s*([\s\S]{1,600}?)(?=\n(?:kode produk|deskripsi produk|deskripsi|ukuran|size|kapasitas|storage|ram)\s*:|\n\n|$)/i},
+    {name:'Ukuran',re:/(?:^|\n)(?:ukuran|size)\s*:\s*([\s\S]{1,400}?)(?=\n(?:kode produk|deskripsi produk|deskripsi|warna|kapasitas|storage|ram)\s*:|\n\n|$)/i},
+    {name:'Kapasitas',re:/(?:^|\n)(?:kapasitas|storage)\s*:\s*([\s\S]{1,400}?)(?=\n(?:kode produk|deskripsi produk|deskripsi|warna|ukuran|size|ram)\s*:|\n\n|$)/i}
+  ].forEach(function(def){
+    const m=text.match(def.re);
+    if(!m||!m[1])return;
+    let values=m[1].split(/\n|\s{2,}|\s*\|\s*|\s*,\s*/).map(function(v){return v.trim()}).filter(Boolean);
+
+    // If the SEO renderer collapses all colour buttons into one line, split the
+    // common multi-word colour names without damaging arbitrary variant labels.
+    if(def.name==='Warna'&&values.length===1){
+      const one=values[0];
+      const known=one.match(/(?:space\s+gr[ae]y|light\s+green|dark\s+blue|light\s+blue|rose\s+gold|midnight\s+blue|tosca|red|blue|green|black|white|gray|grey|pink|purple|yellow|orange|silver|gold)/ig);
+      if(known&&known.length>=2)values=known;
+    }
+    groups.push({name:def.name,values:values});
+  });
+
+  return normalizeVariants_(groups);
+}
+function seoProductPageData_(p){
+  const id=String(p&&p.id||'').trim();
+  if(!id)return {price:'',currency:'',description:'',variants:[]};
+
+  const baseId=id.replace(/-\d{5}$/,'');
+  let page=String(p.canonicalUrl||'');
+  try{
+    const u=new URL(page);
+    if(/\/is--[^/?#]+$/i.test(u.pathname)){
+      u.pathname=u.pathname.replace(/\/is--[^/?#]+$/i,'/ps--'+baseId);
+    }else if(!/\/ps--[^/?#]+$/i.test(u.pathname)){
+      return {price:'',currency:'',description:'',variants:[]};
+    }
+    u.search='';
+    if(p.pickupPointCode)u.searchParams.set('pickupPointCode',String(p.pickupPointCode));
+    page=u.toString();
+  }catch(e){
+    return {price:'',currency:'',description:'',variants:[]};
+  }
+
+  // Use the full UA rotation here, including Googlebot. Blibli's SEO product
+  // page contains price, description and selectable variants even when the
+  // application JSON endpoint blocks server-side requests.
+  const html=fetchText_(page);
+  if(!html)return {price:'',currency:'',description:'',variants:[]};
+
+  return {
+    price:extractHtmlPrice_(html),
+    currency:pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||'IDR',
+    description:extractSeoDescription_(html,p.name||''),
+    variants:extractSeoVariants_(html)
+  };
 }
 function normalizePrice_(value){
   if(value===null||value===undefined)return '';
@@ -805,7 +1013,7 @@ function extractHtmlPrice_(html){
     /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i,
     /"(?:listed|listedPrice|finalPrice|salePrice|sellingPrice|offerPrice|discountedPrice|currentPrice|itemPrice)"\s*:\s*"?([0-9][0-9.,]*)"?/i,
     /"(?:formattedPrice|formattedValue|displayPrice|priceDisplay)"\s*:\s*"Rp\s*([0-9][0-9.,]*)"/i,
-    /(?:^|[>\s])Rp\s*([0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?)(?:[<\s]|$)/i
+    /Rp(?:&nbsp;|\s|<[^>]+>)*([0-9]{1,3}(?:[.\s][0-9]{3})+(?:,[0-9]{1,2})?|[0-9]{4,})/i
   ]);
   if(!raw)raw=pick_(value,[/"price"\s*:\s*"?([0-9][0-9.,]*)"?/i]);
   return normalizePrice_(raw);
@@ -873,8 +1081,15 @@ function refreshPriceForProduct_(p){
 
   let priceSource=priceData.price?'summary':'';
 
-  // Blibli's public product page is often server-rendered even when _summary is
-  // blocked for Apps Script. Request the exact selected SKU via defaultItemSku.
+  // The SEO/product-level page is the strongest fallback for Apps Script:
+  // Googlebot markup carries the visible sell price plus description/variants.
+  const seoData=seoProductPageData_(p);
+  if(!priceData.price&&seoData.price){
+    priceData={price:seoData.price,currency:seoData.currency||'IDR'};
+    priceSource='seo-page';
+  }
+
+  // Blibli's selected-variant page remains a second fallback.
   if(!priceData.price){
     priceData=selectedVariantPagePrice_(p);
     if(priceData.price)priceSource='variant-page';
@@ -897,11 +1112,23 @@ function refreshPriceForProduct_(p){
   }
 
   const price=normalizePrice_(priceData.price);
-  if(!price)return Object.assign({},p,{lastPriceSource:'empty'});
+  const description=cleanDescription_(seoData.description||p.description||'');
+  const variants=normalizeVariants_((seoData.variants&&seoData.variants.length?seoData.variants:p.variants)||[]);
+
+  if(!price){
+    return Object.assign({},p,{
+      description:description||p.description||'',
+      variants:variants,
+      pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
+      lastPriceSource:'empty'
+    });
+  }
 
   return Object.assign({},p,{
     price:price,
     currency:String(priceData.currency||p.currency||'IDR').toUpperCase(),
+    description:description||p.description||'',
+    variants:variants,
     priceUpdatedAt:new Date().toISOString(),
     source:'live-price',
     pickupPointCode:recoveredPickupPointCode||p.pickupPointCode||'',
@@ -938,7 +1165,11 @@ function publicPrice_(id){
       SpreadsheetApp.flush();
       log_('PRICE_LOOKUP',id,'OK',(fresh.lastPriceSource||'unknown')+' · '+fresh.price+' '+(fresh.currency||'IDR'));
     }else{
-      if(fresh.pickupPointCode&&fresh.pickupPointCode!==cached.pickupPointCode){
+      const metadataChanged=
+        (fresh.pickupPointCode&&fresh.pickupPointCode!==cached.pickupPointCode)||
+        (fresh.description&&fresh.description!==cached.description)||
+        (JSON.stringify(fresh.variants||[])!==JSON.stringify(cached.variants||[]));
+      if(metadataChanged){
         upsert_(DRAFT_SHEET,fresh);
         upsert_(PUBLISHED_SHEET,fresh);
         SpreadsheetApp.flush();
@@ -948,7 +1179,7 @@ function publicPrice_(id){
       cache.remove(throttleKey);
       log_('PRICE_LOOKUP',id,'EMPTY','pickup='+(fresh.pickupPointCode||'-')+' · summary/variant/search/PDP tidak mengembalikan harga');
     }
-    return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
+    return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,description:fresh.description||cached.description||null,variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
     if(lock.hasLock())lock.releaseLock();
   }
