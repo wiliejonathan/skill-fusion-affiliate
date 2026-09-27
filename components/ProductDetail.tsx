@@ -17,6 +17,7 @@ export default function ProductDetail({product}:{product:Product}){
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const images=product.images||[];
   const count=images.length;
+  const shownIndex=count?active+1:0;
 
   useEffect(()=>{
     setLiked(readWishlist().includes(product.id));
@@ -84,12 +85,12 @@ export default function ProductDetail({product}:{product:Product}){
 
       <section className="detail-grid">
         <div className="detail-gallery tech-panel">
-          <div className="detail-panel-label"><span>MEDIA ARRAY</span><strong>{String(active+1).padStart(2,"0")} / {String(count).padStart(2,"0")}</strong></div>
+          <div className="detail-panel-label"><span>MEDIA ARRAY</span><strong>{String(shownIndex).padStart(2,"0")} / {String(count).padStart(2,"0")}</strong></div>
           <div className="detail-main-image-wrap">
             {images[active]?<button className="detail-main-image-button" onClick={()=>setLightbox(true)} aria-label="Perbesar foto">
               <img className="detail-main-image" src={images[active]} alt={product.name+` foto ${active+1}`}/>
               <span className="zoom-label"><ZoomIn size={16}/> ENLARGE</span>
-            </button>:null}
+            </button>:<div className="detail-image-placeholder"><span>SF</span><strong>IMAGE NOT AVAILABLE</strong><small>Gunakan tombol Blibli untuk melihat media produk terbaru.</small></div>}
             {count>1?<>
               <button className="detail-arrow detail-prev" onClick={prev} aria-label="Foto sebelumnya"><ChevronLeft size={24}/></button>
               <button className="detail-arrow detail-next" onClick={next} aria-label="Foto berikutnya"><ChevronRight size={24}/></button>

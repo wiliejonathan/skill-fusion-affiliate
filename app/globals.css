@@ -879,3 +879,31 @@ button,a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     animation:none!important;
   }
 }
+
+
+/* Graceful catalog fallback for imports whose Blibli gallery is unavailable. */
+.product-photo-placeholder,.detail-image-placeholder{
+  width:100%;
+  min-height:220px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  padding:20px;
+  text-align:center;
+  background:linear-gradient(145deg,rgba(66,215,255,.05),rgba(77,124,255,.08));
+  border:1px dashed var(--lineStrong);
+  color:var(--muted);
+}
+.product-photo-placeholder span,.detail-image-placeholder span{
+  width:44px;height:44px;border:1px solid var(--lineStrong);border-radius:12px;
+  display:grid;place-items:center;color:var(--cyan);font-weight:900;letter-spacing:.08em;
+}
+.product-photo-placeholder strong,.detail-image-placeholder strong{font-size:9px;letter-spacing:.12em;color:#b7c8dc}
+.detail-image-placeholder{min-height:420px;border:0;background:rgba(255,255,255,.015)}
+.detail-image-placeholder small{max-width:320px;line-height:1.55}
+@media(max-width:599px){
+  .product-photo-placeholder{min-height:150px}
+  .detail-image-placeholder{min-height:290px}
+}

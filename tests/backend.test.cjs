@@ -35,3 +35,17 @@ test('reload writes only Draft; publish transfers it to client',()=>{
 test('unsafe URLs and duplicate batch rejected without writes',()=>{
  const {post,tables}=setup();assert.equal(post({action:'resolve',url:'https://blibli.com.evil.test/a'}).ok,false);assert.equal(post({action:'savePublish',products:[product,product]}).ok,false);assert.equal(tables.Draft.length,1);
 });
+
+
+test('valid imported identity stays published even when gallery is unavailable',()=>{
+ const {post,get,tables}=setup();
+ const withoutImages={...product,id:'NEW-12345-00001',canonicalProductId:'NEW-12345-00001',images:[],affiliateUrl:'https://s.blibli.com/new-product',canonicalUrl:'https://www.blibli.com/p/new-product/is--NEW-12345-00001'};
+ const result=post({action:'savePublish',product:withoutImages});
+ assert.equal(result.ok,true);
+ assert.equal(tables.Draft.length,2);
+ assert.equal(tables.Published.length,2);
+ const published=get({action:'catalog'}).products;
+ assert.equal(published.length,1);
+ assert.equal(published[0].id,'NEW-12345-00001');
+ assert.deepEqual(Array.from(published[0].images),[]);
+});

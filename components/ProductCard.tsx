@@ -73,7 +73,10 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
     >
       <div className="card-tech-rail"><span>SF // #{String(p.sequence).padStart(3,"0")}</span><span>MEDIA {String(count).padStart(2,"0")}</span></div>
       <div className="product-visual gallery-visual">
-        {images[active]?<img className="product-photo" src={images[active]} alt={p.name+` foto ${active+1}`}/>:null}
+        {images[active]
+          ? <img className="product-photo" src={images[active]} alt={p.name+` foto ${active+1}`}/>
+          : <div className="product-photo-placeholder"><span>SF</span><strong>IMAGE NOT AVAILABLE</strong></div>
+        }
         <span className="product-badge">{p.badge}</span>
         <div className="card-actions">
           <button className="icon-btn share-icon-btn" onClick={shareProduct} aria-label="Bagikan produk">
