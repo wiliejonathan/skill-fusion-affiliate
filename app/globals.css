@@ -907,3 +907,109 @@ button,a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   .product-photo-placeholder{min-height:150px}
   .detail-image-placeholder{min-height:290px}
 }
+
+
+/* Hero core v23 — preserve desktop orbit composition on every viewport */
+@media(max-width:900px){
+  .hero-core{
+    width:min(54vw,320px);
+    height:auto;
+    aspect-ratio:1/1;
+    margin:34px auto 10px;
+  }
+  .hero-core .orbit-b{inset:11.5%}
+  .hero-core .orbit-c{inset:23%}
+  .hero-core .core-center{
+    width:40%;
+    height:auto;
+    aspect-ratio:1/1;
+    gap:6px;
+    padding:6px;
+    overflow:hidden;
+  }
+  .hero-core .core-center .sf-logo{
+    max-width:90%;
+    min-width:0;
+    gap:5px;
+    justify-content:center;
+  }
+  .hero-core .core-center .sf-logo-mark{
+    width:clamp(28px,7vw,34px);
+    height:clamp(28px,7vw,34px);
+    flex:0 0 auto;
+  }
+  .hero-core .core-center .sf-logo-copy{
+    min-width:0;
+    flex:0 1 auto;
+  }
+  .hero-core .core-center .sf-logo-copy strong{
+    font-size:clamp(10px,2.4vw,13px);
+    line-height:1;
+    white-space:nowrap;
+  }
+  .hero-core .core-center>span{
+    font-size:clamp(5.5px,1.35vw,7px);
+    letter-spacing:.15em;
+    white-space:nowrap;
+  }
+  .hero-core .core-node{
+    width:12.5%;
+    height:12.5%;
+    min-width:32px;
+    min-height:32px;
+    max-width:38px;
+    max-height:38px;
+  }
+  .hero-core .node-a{top:4%;right:18%}
+  .hero-core .node-b{left:2%;bottom:25%}
+  .hero-core .node-c{right:1%;bottom:16%}
+}
+
+@media(max-width:599px){
+  .hero-core{
+    width:min(74vw,270px);
+    height:auto;
+    aspect-ratio:1/1;
+    margin:26px auto 0;
+  }
+  .hero-core .orbit-b{inset:11.8%}
+  .hero-core .orbit-c{inset:23.6%}
+  .hero-core .core-center{
+    width:42%;
+    height:auto;
+    aspect-ratio:1/1;
+    gap:5px;
+    padding:5px;
+  }
+  .hero-core .core-center .sf-logo{
+    max-width:92%;
+    gap:4px;
+  }
+  .hero-core .core-center .sf-logo-mark{
+    width:26px;
+    height:26px;
+  }
+  .hero-core .core-center .sf-logo-copy strong{
+    font-size:10px;
+    letter-spacing:0;
+  }
+  .hero-core .core-center>span{
+    font-size:5.5px;
+    letter-spacing:.13em;
+  }
+  .hero-core .core-node{
+    width:13%;
+    height:13%;
+    min-width:31px;
+    min-height:31px;
+    max-width:35px;
+    max-height:35px;
+  }
+  .hero-core .core-node svg{
+    width:15px;
+    height:15px;
+  }
+  .hero-core .node-a{top:3.5%;right:17%}
+  .hero-core .node-b{left:1.5%;bottom:24%}
+  .hero-core .node-c{right:.5%;bottom:15%}
+}

@@ -190,6 +190,14 @@ test('product category classifier uses exact product-type filters',()=>{
   'Baterai HP'
  );
  assert.equal(
+  ctx.inferCategory_('BATERAI Samsung Galaxy A17 8GB 256GB replacement','Charging & Cable',[]),
+  'Smartphone'
+ );
+ assert.equal(
+  ctx.inferCategory_('SAMSUNG Galaxy Tab A11 8GB 128GB','Charging & Cable',[]),
+  'Tablet'
+ );
+ assert.equal(
   ctx.inferCategory_('NOKIA 105 garansi resmi','Charging & Cable',[]),
   'Feature Phone'
  );
