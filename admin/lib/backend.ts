@@ -61,6 +61,8 @@ export async function backendFetch(input:string,init:RequestInit={}){
   }else if(url.pathname==="/api/import-job"){
     action=method==="POST"?"importStart":"importStatus";
     if(method==="POST") payload=JSON.parse(String(init.body||"{}"));
+  }else if(url.pathname==="/api/import-kick"){
+    action="importKick";
   }else throw new Error("API tidak dikenal");
 
   try{

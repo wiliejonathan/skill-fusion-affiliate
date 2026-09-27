@@ -717,6 +717,30 @@ export default function AdminPage(){
             `${job.duplicates} duplicate · ${job.failed} gagal`+
             (job.currentUrl?` · ${job.currentUrl}`:"")
           );
+
+          // While Admin is open, don't wait for the approximate Apps Script
+          // clock trigger. Kick up to two queued products immediately.
+          if(document.visibilityState!=="hidden"){
+            try{
+              const kickRes=await fetch("/api/import-kick",{method:"POST"});
+              const kickData=await kickRes.json();
+              const kicked=(kickData?.job||null) as ImportJobState|null;
+              if(kicked&&!stopped){
+                setImportJob(kicked);
+                if(kicked.status==="completed"||kicked.status==="error"){
+                  setBusy(false);
+                  await pullDatabase();
+                  setNotice(
+                    kicked.status==="completed"
+                      ? `✓ Import selesai · ${kicked.imported} produk masuk Client · ${kicked.duplicates} duplicate dilewati · ${kicked.failed} gagal.`
+                      : `Import background berhenti dengan error · ${kicked.imported} berhasil · ${kicked.failed} gagal.`
+                  );
+                }
+              }
+            }catch{
+              // Scheduled trigger will continue the same persisted job.
+            }
+          }
           return;
         }
 
@@ -862,6 +886,10 @@ export default function AdminPage(){
       setImportJob(job);
       setText("");
 
+      // Start the first worker batch immediately. The Apps Script trigger remains
+      // scheduled as a fallback if this tab closes during or after the request.
+      void fetch("/api/import-kick",{method:"POST"}).catch(()=>{});
+
       if(preflightDuplicates.length){
         setDuplicatePopup({
           title:preflightDuplicates.length>1?"Beberapa duplicate dilewati":"Link duplicate dilewati",
@@ -871,7 +899,7 @@ export default function AdminPage(){
 
       setNotice(
         `✓ Background import dimulai · ${job.total} link masuk antrean. `+
-        "Tab Admin boleh ditutup; proses tetap berjalan di Apps Script."
+        "Proses langsung dimulai. Tab Admin boleh ditutup; sisa antrean tetap berjalan di Apps Script."
       );
     }catch(error){
       setBusy(false);

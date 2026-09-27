@@ -245,3 +245,26 @@ test('fast image resolver prefers public indexed images without calling Blibli m
  assert.equal(data[0],indexed);
  assert.equal(blibliSearchCalls,0);
 });
+
+
+test('fast redirect resolver reaches Product ID without sequential fallback',()=>{
+ const canonical='https://www.blibli.com/p/test-product/is--ABC-12345-00001-00001';
+ let fallbackCalls=0;
+ const response=(code,headers={},body='')=>({
+  getResponseCode:()=>code,
+  getAllHeaders:()=>headers,
+  getContentText:()=>body
+ });
+ const ctx=runtime({
+  UrlFetchApp:{
+   fetchAll:()=>[
+    response(302,{Location:canonical}),
+    response(403,{},'blocked')
+   ]
+  }
+ });
+ ctx.resolveUrl_=()=>{fallbackCalls++;return {finalUrl:'',canonical:''}};
+ const result=ctx.resolveUrlFast_('https://s.blibli.com/GNtk/example');
+ assert.equal(result.canonical,canonical);
+ assert.equal(fallbackCalls,0);
+});
