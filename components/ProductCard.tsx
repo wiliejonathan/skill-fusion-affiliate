@@ -1,10 +1,9 @@
 "use client";
 
-import {useMemo,useState} from "react";
+import {useState} from "react";
 import {useRouter} from "next/navigation";
 import {Check,ChevronLeft,ChevronRight,ExternalLink,Heart,ScanLine,Share2} from "lucide-react";
 import type {Product} from "@/lib/products";
-import {requestAppsScript} from "@/shared/apps-script";
 
 type Props={product:Product;wished:boolean;onWishlist:(id:string)=>void};
 
@@ -14,42 +13,9 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
   const [navigating,setNavigating]=useState(false);
   const [shareState,setShareState]=useState<"idle"|"shared"|"copied">("idle");
   const [wishlistFeedback,setWishlistFeedback]=useState<"idle"|"saved"|"removed">("idle");
-  const [cardPrice,setCardPrice]=useState({price:p.price||null,currency:p.currency||null});
   const images=p.images||[];
   const count=images.length;
   const detailUrl=`/product?id=${encodeURIComponent(p.id)}`;
-
-  const formattedPrice=useMemo(()=>{
-    const raw=String(cardPrice.price||"").trim();
-    if(!raw) return null;
-
-    const numeric=Number(raw.replace(/[^0-9]/g,""));
-    if(!Number.isFinite(numeric)||numeric<=0) return null;
-
-    if((cardPrice.currency||"IDR").toUpperCase()==="IDR"){
-      return new Intl.NumberFormat("id-ID",{
-        style:"currency",
-        currency:"IDR",
-        maximumFractionDigits:0
-      }).format(numeric);
-    }
-
-    return `${cardPrice.currency||""} ${new Intl.NumberFormat("id-ID").format(numeric)}`.trim();
-  },[cardPrice.price,cardPrice.currency]);
-
-  async function contributeLivePrice(){
-    try{
-      const data=await requestAppsScript("price",{id:p.id});
-      if(data?.price){
-        setCardPrice({
-          price:data.price,
-          currency:data.currency||p.currency||"IDR"
-        });
-      }
-    }catch{
-      // Navigation must never be blocked by a live-price refresh failure.
-    }
-  }
 
   function openDetail(){
     if(navigating) return;
@@ -147,16 +113,8 @@ export default function ProductCard({product:p,wished,onWishlist}:Props){
         <h3><span className="product-sequence">#{String(p.sequence).padStart(3,"0")}</span> {p.name}</h3>
         <div className="product-id-line"><ScanLine size={13}/><span>{p.canonicalProductId}</span></div>
         <div className="feature-list">{p.features.map(x=><span key={x}>{x}</span>)}</div>
-        <div className="price-block">
-          <strong>LIVE PRICE @ BLIBLI</strong>
-          {formattedPrice
-            ? <div className="live-price">{formattedPrice}</div>
-            : <div className="live-price pending">Harga mengikuti Blibli</div>
-          }
-          <span className="live-note">Harga & stok mengikuti halaman merchant.</span>
-        </div>
-        <div className="card-detail-hint">OPEN PRODUCT INTELLIGENCE →</div>
-        <a className="cta-btn" href={p.affiliateUrl} target="_blank" rel="sponsored noreferrer" onClick={e=>{stop(e);void contributeLivePrice();}}>Buka di Blibli <ExternalLink size={15}/></a>
+        <div className="card-detail-hint">VIEW PRODUCT GALLERY →</div>
+        <a className="cta-btn" href={p.affiliateUrl} target="_blank" rel="sponsored noreferrer" onClick={stop}>Cek di Blibli <ExternalLink size={15}/></a>
       </div>
     </article>
 
