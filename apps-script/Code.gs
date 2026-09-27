@@ -64,13 +64,14 @@ function doPost(e){
     const action=String(p.action||'');
     if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
     if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
-    if(['savePublish','reloadDom','reload','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
+    if(['savePublish','reloadDom','reload','reloadAll','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
     lock=LockService.getScriptLock();
     if(!lock.tryLock(30000))throw new Error('Database sedang diproses. Coba lagi.');
     let out;
     if(action==='savePublish')out=savePublish_(p);
     else if(action==='reloadDom')out=reloadDom_(String(p.url||''));
     else if(action==='reload')out=reloadOne_(String(p.id||''));
+    else if(action==='reloadAll')out=reloadAll_();
     else if(action==='publish')out=publishOne_(String(p.id||''));
     else if(action==='publishAll')out=publishAll_();
     else out=deleteOne_(String(p.id||''));
