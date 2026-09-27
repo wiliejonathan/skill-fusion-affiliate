@@ -7,6 +7,46 @@ if(!r.ok) throw new Error("catalog HTTP "+r.status);
 const j=await r.json();
 const p=j.products?.find(x=>/^https:\/\/(?:www\.)?blibli\.com\//i.test(String(x.canonicalUrl||"")));
 if(!p) throw new Error("no product");
+const ml=new URL("https://api.microlink.io/");
+ml.searchParams.set("url",p.canonicalUrl);
+ml.searchParams.set("prerender","true");
+ml.searchParams.set("waitForSelector",'[data-testid="priceComponentOffered"]');
+ml.searchParams.set("meta","false");
+ml.searchParams.set("data.price.selector",'[data-testid="priceComponentOffered"]');
+ml.searchParams.set("data.price.attr","text");
+ml.searchParams.set("data.originalPrice.selector",".product-price__before");
+ml.searchParams.set("data.originalPrice.attr","text");
+ml.searchParams.set("data.sold.selector",".sold-seen-label__label");
+ml.searchParams.set("data.sold.attr","text");
+ml.searchParams.set("data.description.selector",".product-description-section");
+ml.searchParams.set("data.description.attr","text");
+try{
+ const mr=await fetch(ml,{headers:{accept:"application/json"}});
+ const mt=await mr.text();
+ console.log("MICROLINK_HTTP",mr.status,mt.slice(0,4000));
+ try{
+  const mj=JSON.parse(mt);
+  const mp=String(mj?.data?.price||"").replace(/[^0-9]/g,"");
+  if(mr.ok&&mp){
+   const result={
+    generatedAt:new Date().toISOString(),
+    products:[{
+     id:p.id,canonicalUrl:p.canonicalUrl,title:p.name||"",
+     price:mp,currency:"IDR",
+     originalPrice:String(mj?.data?.originalPrice||"").replace(/[^0-9]/g,""),
+     soldText:String(mj?.data?.sold||""),
+     description:String(mj?.data?.description||""),
+     httpStatus:mr.status,source:"microlink-prerender",diagnostic:"ok"
+    }]
+   };
+   fs.mkdirSync(out.split("/").slice(0,-1).join("/"),{recursive:true});
+   fs.writeFileSync(out,JSON.stringify(result,null,2)+"\n");
+   console.log(JSON.stringify(result,null,2));
+   process.exit(0);
+  }
+ }catch{}
+}catch(e){console.log("MICROLINK_ERROR",String(e?.message||e));}
+
 const browser=await chromium.launch({headless:true,args:["--disable-blink-features=AutomationControlled","--no-sandbox"]});
 const context=await browser.newContext({
  locale:"id-ID",timezoneId:"Asia/Jakarta",
