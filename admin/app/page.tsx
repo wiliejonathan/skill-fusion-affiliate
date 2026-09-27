@@ -632,11 +632,23 @@ export default function AdminPage(){
     setText(value);
   }
 
+  function appendMultipleLinks(current:string,pasted:string){
+    const incoming=normalizeImportText(pasted,"multiple").trim();
+    if(!incoming) return current;
+    const existing=String(current||"").replace(/[\s\n]+$/,"");
+    return existing.trim()?existing+"\n"+incoming:incoming;
+  }
+
   function handleImportPaste(event:React.ClipboardEvent<HTMLTextAreaElement>){
     const pasted=event.clipboardData.getData("text");
     if(!pasted) return;
     event.preventDefault();
-    setText(normalizeImportText(pasted,importMode));
+
+    if(importMode==="multiple"){
+      setText(current=>appendMultipleLinks(current,pasted));
+    }else{
+      setText(normalizeImportText(pasted,"single"));
+    }
     setNotice("");
   }
 
@@ -647,7 +659,17 @@ export default function AdminPage(){
         setNotice("Clipboard kosong.");
         return;
       }
-      setText(normalizeImportText(pasted,importMode));
+
+      if(importMode==="multiple"){
+        const incoming=normalizeImportText(pasted,"multiple").trim();
+        if(!incoming){
+          setNotice("Clipboard tidak berisi link http/https yang valid.");
+          return;
+        }
+        setText(current=>appendMultipleLinks(current,pasted));
+      }else{
+        setText(normalizeImportText(pasted,"single"));
+      }
       setNotice("");
     }catch{
       setNotice("Clipboard tidak dapat dibaca. Izinkan akses clipboard di browser lalu coba lagi.");
