@@ -100,3 +100,44 @@ test('background retry resumes the same checkpoint and does not miscount a recov
  assert.equal(result.job.retries,1);
  assert.equal(result.job.checkpoint,null);
 });
+
+
+test('stale running N/N import job self-heals to completed',()=>{
+ const {ctx}=setup();
+ const store={};
+ ctx.PropertiesService={
+  getScriptProperties:()=>({
+   getProperty:key=>store[key]||null,
+   setProperty:(key,value)=>{store[key]=String(value)}
+  })
+ };
+ const job={
+  id:'IMP-stale-complete',
+  status:'running',
+  links:['https://s.blibli.com/already-done'],
+  cursor:1,
+  total:1,
+  done:1,
+  imported:1,
+  duplicates:0,
+  failed:0,
+  retries:0,
+  checkpoint:null,
+  currentUrl:'',
+  messages:[],
+  createdAt:new Date().toISOString(),
+  updatedAt:new Date().toISOString()
+ };
+ store.SKILL_FUSION_IMPORT_JOB_V1=JSON.stringify(job);
+
+ const result=ctx.importJobStatus_();
+ assert.equal(result.ok,true);
+ assert.equal(result.job.status,'completed');
+ assert.equal(result.job.done,1);
+ assert.equal(result.job.total,1);
+
+ const saved=JSON.parse(store.SKILL_FUSION_IMPORT_JOB_V1);
+ assert.equal(saved.status,'completed');
+ assert.equal(saved.cursor,1);
+ assert.equal(saved.done,1);
+});

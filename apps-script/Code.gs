@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:19,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:20,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -104,6 +104,36 @@ function writeImportJob_(job){
   importProperties_().setProperty(IMPORT_JOB_PROPERTY,JSON.stringify(job));
   return job;
 }
+function normalizeImportJobState_(job){
+  if(!job)return job;
+  const total=Array.isArray(job.links)?job.links.length:Number(job.total||0);
+  job.total=total;
+  job.cursor=Math.max(0,Number(job.cursor||0));
+  job.done=Math.max(0,Number(job.done||0));
+
+  // Recover jobs that finished their last item but were interrupted before the
+  // terminal status write. This used to leave Admin stuck at Import N/N.
+  if(
+    (job.status==='queued'||job.status==='running') &&
+    total>=0 &&
+    job.cursor>=total &&
+    !job.checkpoint
+  ){
+    job.cursor=total;
+    job.done=total;
+    job.status='completed';
+    job.currentUrl='';
+    writeImportJob_(job);
+    try{clearImportTriggers_()}catch(ignore){}
+    log_(
+      'IMPORT_JOB',
+      job.id||'',
+      'RECOVERED',
+      Number(job.imported||0)+' imported · '+Number(job.duplicates||0)+' duplicate · '+Number(job.failed||0)+' failed'
+    );
+  }
+  return job;
+}
 function importJobView_(job){
   if(!job)return {ok:true,job:null};
   return {
@@ -133,7 +163,7 @@ function importJobView_(job){
   };
 }
 function importJobStatus_(){
-  return importJobView_(readImportJob_());
+  return importJobView_(normalizeImportJobState_(readImportJob_()));
 }
 function uniqueImportLinks_(links){
   const seen={},out=[];
@@ -160,7 +190,7 @@ function scheduleImportTrigger_(){
   ScriptApp.newTrigger(IMPORT_TRIGGER_HANDLER).timeBased().after(3000).create();
 }
 function startImportJob_(links){
-  const active=readImportJob_();
+  const active=normalizeImportJobState_(readImportJob_());
   if(active&&(active.status==='queued'||active.status==='running')){
     const e=new Error('Masih ada proses import yang berjalan. Tunggu sampai selesai.');
     e.code='IMPORT_RUNNING';
@@ -244,7 +274,7 @@ function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining,source){
       }
     }
 
-    let job=readImportJob_();
+    let job=normalizeImportJobState_(readImportJob_());
     if(!job||(['queued','running'].indexOf(job.status)<0)){
       return importJobView_(job);
     }
