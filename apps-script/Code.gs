@@ -3148,12 +3148,12 @@ function inferCategory_(title,storedCategory,specifications){
   if(/\b(power\s*bank|powerbank|battery\s*pack|portable\s+charger)\b/i.test(text))return 'Power Bank';
   if(/\b(smart\s*watch|smartwatch|fitness\s*(?:band|tracker)|forerunner|apple\s*watch|galaxy\s*watch|amazfit|smart\s*band|garmin\s+(?:venu|vivo|instinct|fenix|epix))\b/i.test(text))return 'Smartwatch & Wearable';
   if(/\b(earbuds?|earphones?|headphones?|headsets?|tws|speaker|soundbar|microphone|audio)\b/i.test(text))return 'Audio';
-  if(/\b(smartphone|handphone|mobile\s+phone|iphone\b|ipad\b|tablet\b|galaxy\s+[asz]\d|redmi\s+note|poco\s+[a-z0-9])\b/i.test(text))return 'Smartphone & Tablet';
   if(/\b(smart\s*home|smart\s*plug|smart\s*bulb|ip\s*camera|cctv|doorbell|robot\s*vacuum|vacuum\s*cleaner|air\s*purifier|smart\s*sensor)\b/i.test(text))return 'Smart Home';
   if(/\b(router|wi-?fi|modem|mesh\s*wifi|ethernet|network\s*switch|ssd|hdd|hard\s*drive|flash\s*drive|usb\s*drive|micro\s*sd|memory\s*card|nas\b)\b/i.test(text))return 'Networking & Storage';
   if(/\b(keyboard|mouse|monitor|laptop|notebook|webcam|gamepad|controller|usb\s*hub|type\s*c\s*hub|docking\s*station)\b/i.test(text))return 'Computer & Peripheral';
   if(/\b(kabel|cable|braided\s+line|data\s+charger|data\s+cable|lightning\s+cable|usb\s*[ac]\s*to|usb-?[ac]\s*to|type\s*-?c\s*to|c\s*to\s*c)\b/i.test(text))return 'Charging & Cable';
   if(/\b(gan\s*charger|wall\s*charger|travel\s*charger|wireless\s*charger|charging\s*station|charging\s*dock|car\s*charger|power\s*adapter|power\s*adaptor|adapter|adaptor|kepala\s*charger)\b/i.test(text))return 'Charger & Adapter';
+  if(/\b(smartphone|handphone|mobile\s+phone|iphone\b|ipad\b|tablet\b|galaxy\s+[asz]\d|redmi\s+note|poco\s+[a-z0-9])\b/i.test(text))return 'Smartphone & Tablet';
   if(/\b(case|casing|cover|holder|stand|mount|screen\s*protector|tempered\s*glass|strap|stylus|sleeve|pouch)\b/i.test(text))return 'Tech Accessories';
 
   if(/power\s*bank/i.test(stored))return 'Power Bank';
