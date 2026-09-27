@@ -689,8 +689,9 @@ export default function AdminPage(){
 
   async function analyzeLinks(){
     const ready=checks.filter(x=>x.status==="READY");
+    const preflightDuplicates=checks.filter(x=>x.status==="DUPLICATE");
     if(!ready.length){
-      const duplicates=checks.filter(x=>x.status==="DUPLICATE");
+      const duplicates=preflightDuplicates;
       if(duplicates.length){
         setDuplicatePopup({
           title:duplicates.length>1?"Link duplicate ditemukan":"Link duplicate ditemukan",
@@ -797,28 +798,10 @@ export default function AdminPage(){
         let saveData=await saveRes.json();
         if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Database sync awal gagal.");
 
-        // The resolver result is the authoritative import payload. Cloud live-commerce
-        // scraping is intentionally not retried here because Blibli blocks it.
-        const finalProduct=buildDbProducts(candidateCatalog,candidateResolved)
-          .find(product=>product.affiliateUrl===item.inputUrl);
-
-        if(!finalProduct||!finalProduct.images.length){
-          // Never leave an image-less import in Draft/Published.
-          try{
-            await fetch("/api/catalog?id="+encodeURIComponent(productId),{method:"DELETE"});
-          }catch{}
-          throw new Error("Foto produk belum berhasil dibaca otomatis. Import dibatalkan agar katalog tidak menyimpan produk tanpa gambar.");
-        }
-
-        // Publish the available catalog fields immediately.
-        saveRes=await fetch("/api/catalog",{
-          method:"POST",
-          headers:{"content-type":"application/json"},
-          body:JSON.stringify({product:finalProduct})
-        });
-        saveData=await saveRes.json();
-        if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Sinkron gallery ke Client gagal.");
-
+        // Identity + affiliate route are enough to keep a product. Blibli may block
+        // cloud gallery/metadata reads, so an image-less product must NOT be deleted.
+        // savePublish above already writes Draft + Published, which makes the product
+        // immediately available to the Client catalog.
         nextCatalog=candidateCatalog;
         nextResolved=candidateResolved;
         imported++;
@@ -828,27 +811,45 @@ export default function AdminPage(){
       }
     }
 
+    if(imported){
+      try{
+        const synced=await pushDatabase(nextCatalog,nextResolved);
+        if(synced?.length){
+          const local=dbToLocal(synced);
+          nextCatalog=local.catalog;
+          nextResolved=local.resolved;
+        }
+      }catch(error){
+        failedMessages.push("Sinkron final ke Client gagal: "+(error instanceof Error?error.message:"coba lagi"));
+      }
+    }
+
     setCatalog(nextCatalog);
     setResolved(nextResolved);
     setText("");
     setDirtyUrls(prev=>prev.filter(url=>!nextCatalog.some(item=>item.affiliateUrl===url)));
     setServerReady(true);
 
-    if(resolvedDuplicateItems.length){
+    const allDuplicateItems=[
+      ...preflightDuplicates.map(row=>`${row.inputUrl} — ${row.reason}`),
+      ...resolvedDuplicateItems
+    ];
+    const totalDuplicates=preflightDuplicates.length+resolvedDuplicates;
+    if(allDuplicateItems.length){
       setDuplicatePopup({
-        title:resolvedDuplicateItems.length>1?"Beberapa duplicate ditemukan":"Produk duplicate ditemukan",
-        items:resolvedDuplicateItems
+        title:allDuplicateItems.length>1?"Beberapa duplicate ditemukan":"Produk duplicate ditemukan",
+        items:allDuplicateItems
       });
     }
 
     if(imported){
       setNotice(
-        `✓ ${imported} produk berhasil di-import dan langsung tersedia di Admin + Client.`+
-        (resolvedDuplicates?` ${resolvedDuplicates} duplicate Product ID diblokir.`:"")+
+        `✓ ${imported} produk baru berhasil di-import dan langsung sinkron ke Client.`+
+        (totalDuplicates?` ${totalDuplicates} link duplicate dilewati.`:"")+
         (failedImports?` ${failedImports} link gagal.`:"")
       );
-    }else if(resolvedDuplicates){
-      setNotice(`Tidak ada produk baru. ${resolvedDuplicates} link ternyata mengarah ke Product ID yang sudah ada, jadi duplicate otomatis diblokir.`);
+    }else if(preflightDuplicates.length+resolvedDuplicates){
+      setNotice(`Tidak ada produk baru. ${preflightDuplicates.length+resolvedDuplicates} link duplicate dilewati.`);
     }else{
       const detail=failedMessages[0]||"Identitas atau foto katalog belum dapat dibaca.";
       setNotice("Import gagal: "+detail);
@@ -1180,8 +1181,26 @@ export default function AdminPage(){
       <header id="dashboard">
         <div><span className="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Kelola hanya data katalog yang stabil: identitas produk, foto, kategori, fitur, dan link affiliate.</p></div>
         <div className="header-controls">
-          <div className="pill">STABLE CATALOG</div>
+          <div className="dashboard-actions">
+            <button
+              className="dashboard-action refresh-all"
+              onClick={refreshDataAll}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
+            >
+              <RefreshCw size={16}/>
+              {bulkAction==="refresh"?"Refreshing All...":"Refresh Data All"}
+            </button>
+            <button
+              className="dashboard-action reload-all"
+              onClick={reloadAll}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
+            >
+              <PackageSearch size={16}/>
+              {bulkAction==="reload"?"Reloading All...":"Reload All"}
+            </button>
+          </div>
           <button className="admin-logout" onClick={logoutAdmin}>Logout</button>
+          <div className="pill">STABLE CATALOG</div>
         </div>
       </header>
 
@@ -1273,7 +1292,7 @@ export default function AdminPage(){
                 {meta?.images?.length?<div className="admin-gallery">
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
                 </div>:null}
-                {meta?.images?.length?<small>{meta.images.length} foto katalog tersedia</small>:<small>Foto katalog belum tersedia</small>}
+                {meta?.images?.length?<small>{meta.images.length} foto katalog tersedia</small>:<small>Foto belum tersedia · produk tetap aktif di Client</small>}
                 <div className="admin-meta-data stable-fields">
                   <small><strong>Data tampil:</strong> nama produk · brand · kategori · foto · fitur · Product ID · link affiliate</small>
                   <small><strong>Dicek di Blibli:</strong> harga · diskon · stok · varian · detail penawaran</small>
