@@ -386,7 +386,7 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
   // Fallback 2: Domainee's browser-safe redirect checker.
   try{
     const endpoint="https://api.domainee.dev/v1/tools/redirect-checker?url="+encodeURIComponent(inputUrl);
-    const response=await fetchWithTimeout(endpoint,{cache:"no-store"},12000);
+    const response=await externalFetchWithTimeout(endpoint,{cache:"no-store"},12000);
     if(response.ok){
       const payload=await response.json();
       const candidates=[
@@ -501,7 +501,7 @@ async function enrichResolvedImages(data:ResolvedProduct,inputUrl:string):Promis
   // Reader fallback: collect any Blibli catalog images embedded in markdown/text.
   for(const target of targets){
     try{
-      const response=await fetchWithTimeout("https://r.jina.ai/"+target,{cache:"no-store"},12000);
+      const response=await externalFetchWithTimeout("https://r.jina.ai/"+target,{cache:"no-store"},12000);
       if(!response.ok) continue;
       const body=await response.text();
       add(body.match(/https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\s<>\])]+/ig)||[]);
@@ -519,10 +519,26 @@ async function fetchWithTimeout(
   init:RequestInit={},
   timeoutMs=30000
 ){
+  let timer=0;
+  const timeout=new Promise<never>((_,reject)=>{
+    timer=window.setTimeout(()=>reject(new Error("Request timeout")),timeoutMs);
+  });
+  try{
+    return await Promise.race([fetch(input,init),timeout]);
+  }finally{
+    if(timer) window.clearTimeout(timer);
+  }
+}
+
+async function externalFetchWithTimeout(
+  input:Parameters<typeof globalThis.fetch>[0],
+  init:RequestInit={},
+  timeoutMs=12000
+){
   const controller=new AbortController();
   const timer=window.setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    return await fetch(input,{...init,signal:controller.signal});
+    return await globalThis.fetch(input,{...init,signal:controller.signal});
   }finally{
     window.clearTimeout(timer);
   }
