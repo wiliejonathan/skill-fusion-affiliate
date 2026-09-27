@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:17,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:18,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -64,6 +64,7 @@ function doPost(e){
     const action=String(p.action||'');
     if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
     if(action==='importStatus')return output_(importJobStatus_());
+    if(action==='importKick')return output_(kickImportJob_());
     if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
     if(['importStart','savePublish','reloadDom','reload','reloadAll','repairMissingImages','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
     lock=LockService.getScriptLock();
@@ -216,35 +217,39 @@ function importProductFromResolved_(resolved,url){
     source:'background-import'
   };
 }
-function processImportQueueTrigger(){
+
+function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining){
   let lock=null;
   try{
     if(typeof LockService!=='undefined'){
       lock=LockService.getScriptLock();
-      if(!lock.tryLock(5000)){
-        scheduleImportTrigger_();
-        return;
+      if(!lock.tryLock(1200)){
+        return importJobView_(readImportJob_());
       }
     }
 
     let job=readImportJob_();
     if(!job||(['queued','running'].indexOf(job.status)<0)){
-      clearImportTriggers_();
-      return;
+      return importJobView_(job);
     }
 
     job.status='running';
     writeImportJob_(job);
+
     const started=Date.now();
     let processed=0;
+    let existing=readProducts_(DRAFT_SHEET);
 
-    while(job.cursor<job.links.length&&processed<6&&(Date.now()-started)<240000){
+    while(
+      job.cursor<job.links.length &&
+      processed<Math.max(1,Number(maxItems)||1) &&
+      (Date.now()-started)<Math.max(15000,Number(maxMs)||60000)
+    ){
       const url=String(job.links[job.cursor]||'');
       job.currentUrl=url;
       writeImportJob_(job);
 
       try{
-        const existing=readProducts_(DRAFT_SHEET);
         const sameUrl=existing.find(function(p){return p.affiliateUrl===url});
         if(sameUrl){
           job.duplicates++;
@@ -254,7 +259,7 @@ function processImportQueueTrigger(){
           const id=String(resolved.canonicalProductId||'').toUpperCase();
           const canonical=String(resolved.canonicalUrl||'').replace(/\/$/,'').toLowerCase();
           const duplicate=existing.find(function(p){
-            return String(p.id||'').toUpperCase()===id||
+            return String(p.id||'').toUpperCase()===id ||
               (!!canonical&&String(p.canonicalUrl||'').replace(/\/$/,'').toLowerCase()===canonical);
           });
 
@@ -264,6 +269,8 @@ function processImportQueueTrigger(){
           }else{
             const product=importProductFromResolved_(resolved,url);
             savePublish_({product:product});
+            const saved=readProducts_(DRAFT_SHEET).find(function(p){return p.id===product.id});
+            existing.push(saved||product);
             job.imported++;
             job.messages.push('Berhasil: '+product.id+' · '+product.images.length+' image');
           }
@@ -289,8 +296,10 @@ function processImportQueueTrigger(){
       log_('IMPORT_JOB',job.id,'DONE',job.imported+' imported · '+job.duplicates+' duplicate · '+job.failed+' failed');
     }else{
       writeImportJob_(job);
-      scheduleImportTrigger_();
+      if(scheduleRemaining) scheduleImportTrigger_();
     }
+
+    return importJobView_(job);
   }catch(e){
     const job=readImportJob_();
     if(job){
@@ -302,9 +311,18 @@ function processImportQueueTrigger(){
       log_('IMPORT_JOB',job.id,'ERROR',String(e&&e.message||e).slice(0,240));
     }
     try{clearImportTriggers_()}catch(ignore){}
+    return importJobView_(job);
   }finally{
     if(lock&&lock.hasLock())lock.releaseLock();
   }
+}
+function kickImportJob_(){
+  // Process up to two products immediately while the Admin tab is open.
+  // The scheduled trigger remains a fallback if the tab/browser is closed.
+  return processImportQueueBatch_(2,75000,true);
+}
+function processImportQueueTrigger(){
+  processImportQueueBatch_(6,240000,true);
 }
 
 function validBlibliUrl_(url){
@@ -318,7 +336,7 @@ function resolveProduct_(url){
 
   // Resolve identity first. Import must not fail merely because Blibli omits
   // gallery metadata from the server-side response.
-  const resolved=resolveUrl_(url);
+  const resolved=resolveUrlFast_(url);
   const canonical=canonicalProductUrl_(resolved.canonical||resolved.finalUrl||url);
   const id=productId_(canonical)||productId_(resolved.finalUrl||'');
 
@@ -633,6 +651,85 @@ function reloadFromBlibli_(p){
   if(!isUsableProductTitle_(title))title=p.name;
   return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:brand,category:category,features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,originalPrice:originalPrice,discountPercent:discountPercent,soldText:soldText,description:description,specifications:specifications,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
+
+function resolveUrlFast_(url){
+  if(productId_(url))return {finalUrl:url,canonical:canonicalProductUrl_(url)};
+  if(typeof UrlFetchApp==='undefined'||typeof UrlFetchApp.fetchAll!=='function')return resolveUrl_(url);
+
+  let current=String(url||''),html='';
+  const uas=[PRODUCT_FETCH_UAS[1],PRODUCT_FETCH_UAS[0]];
+
+  for(let i=0;i<6;i++){
+    validBlibliUrl_(current);
+    if(productId_(current))break;
+
+    const requests=uas.map(function(ua){
+      return {
+        url:current,
+        method:'get',
+        followRedirects:false,
+        muteHttpExceptions:true,
+        headers:{
+          Accept:'text/html,application/xhtml+xml',
+          'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+          'Cache-Control':'no-cache',
+          Pragma:'no-cache',
+          'User-Agent':ua
+        }
+      };
+    });
+
+    let responses=[];
+    try{responses=UrlFetchApp.fetchAll(requests)}catch(e){responses=[]}
+    let response=null;
+
+    for(let r=0;r<responses.length;r++){
+      const code=responses[r].getResponseCode();
+      if(code>=300&&code<400){response=responses[r];break}
+      if(!response&&code>=200&&code<300)response=responses[r];
+    }
+    if(!response)break;
+
+    const code=response.getResponseCode();
+    const headers=response.getAllHeaders()||{};
+    const loc=headers.Location||headers.location;
+
+    if(code>=300&&code<400&&loc){
+      const next=absoluteUrl_(current,String(loc));
+      if(/^https:\/\/(?:www\.|s\.)?blibli\.com(?:[/?#]|$)/i.test(next)){
+        current=next;
+        if(productId_(current))break;
+        continue;
+      }
+      break;
+    }
+
+    html=response.getContentText()||'';
+    const canonical=pick_(html,[
+      /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
+      /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i
+    ]);
+    if(productId_(canonical||'')){
+      current=canonical;
+      break;
+    }
+    const embedded=String(html).match(/https:\/\/(?:www\.)?blibli\.com\/p\/[^"'\\\s<>]+\/is--[A-Za-z0-9-]+/i);
+    if(embedded&&embedded[0]){
+      current=embedded[0];
+      break;
+    }
+    break;
+  }
+
+  if(productId_(current)){
+    return {finalUrl:current,canonical:canonicalProductUrl_(current)};
+  }
+
+  // Only fall back to the older sequential resolver when the parallel redirect
+  // path cannot reach a product identity.
+  return resolveUrl_(url);
+}
+
 function resolveUrl_(url){
   let current=url,html='';
 
