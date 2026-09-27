@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:8,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:9,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -527,6 +527,64 @@ function fetchTextFast_(url){
   }
   return '';
 }
+function fetchSeoText_(url,productId){
+  const uas=[
+    PRODUCT_FETCH_UAS[3], // Googlebot: Blibli exposes SEO product content here.
+    PRODUCT_FETCH_UAS[2], // Mobile browser.
+    PRODUCT_FETCH_UAS[1], // Desktop browser.
+    PRODUCT_FETCH_UAS[0]
+  ];
+
+  let best='',bestScore=-1;
+  const id=String(productId||'').toLowerCase();
+  const base=id.replace(/-\d{5}$/,'');
+  const seen={};
+
+  for(let i=0;i<uas.length;i++){
+    try{
+      const r=UrlFetchApp.fetch(url,{
+        muteHttpExceptions:true,
+        followRedirects:true,
+        headers:{
+          Accept:'text/html,application/xhtml+xml',
+          'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+          'Cache-Control':'no-cache',
+          Pragma:'no-cache',
+          'User-Agent':uas[i]
+        }
+      });
+      if(r.getResponseCode()<200||r.getResponseCode()>=400)continue;
+
+      const body=r.getContentText();
+      if(!body)continue;
+
+      const signature=body.length+'|'+body.slice(0,160);
+      if(seen[signature])continue;
+      seen[signature]=true;
+
+      const low=decodeHtml_(body).toLowerCase();
+      let score=0;
+
+      if(id&&low.indexOf(id)>=0)score+=140;
+      else if(base&&low.indexOf(base)>=0)score+=100;
+
+      if(/product:price:amount|"(?:listed|finalprice|saleprice|sellingprice|price)"\s*:|rp(?:\s|&nbsp;|<[^>]+>)*[0-9]/i.test(body))score+=120;
+      if(/deskripsi produk|uniquesellingpoint|productdescription|productstory/i.test(low))score+=80;
+      if(/(?:^|[^a-z])(warna|color|ukuran|size|kapasitas|storage|variant)(?:[^a-z]|$)/i.test(low))score+=45;
+      score+=Math.min(40,Math.floor(body.length/100000));
+
+      if(score>bestScore){
+        best=body;
+        bestScore=score;
+      }
+
+      // This is already a rich product response; no reason to keep rotating UA.
+      if(score>=260)break;
+    }catch(e){}
+  }
+
+  return best;
+}
 function selectedVariantPagePrice_(p){
   const id=String(p&&p.id||'').trim();
   if(!id)return {price:'',currency:''};
@@ -549,7 +607,7 @@ function selectedVariantPagePrice_(p){
     return {price:'',currency:''};
   }
 
-  const html=fetchTextFast_(page);
+  const html=fetchSeoText_(page,id);
   if(!html)return {price:'',currency:''};
 
   const price=extractHtmlPrice_(html);
@@ -959,7 +1017,7 @@ function ampProductPageData_(p){
     return {price:'',currency:'',description:'',variants:[]};
   }
 
-  const html=fetchText_(page);
+  const html=fetchSeoText_(page,id);
   if(!html)return {price:'',currency:'',description:'',variants:[]};
 
   return {
@@ -995,7 +1053,7 @@ function seoProductPageData_(p){
   // Use the full UA rotation here, including Googlebot. Blibli's SEO product
   // page contains price, description and selectable variants even when the
   // application JSON endpoint blocks server-side requests.
-  const html=fetchText_(page);
+  const html=fetchSeoText_(page,p&&p.id||'');
   if(!html)return {price:'',currency:'',description:'',variants:[]};
 
   return {
@@ -1208,7 +1266,7 @@ function refreshPriceForProduct_(p){
 
   // Final fallback: direct PDP HTML.
   if(!priceData.price){
-    const html=fetchTextFast_(p.canonicalUrl||p.affiliateUrl);
+    const html=fetchSeoText_(p.canonicalUrl||p.affiliateUrl,p.id);
     priceData={
       price:extractHtmlPrice_(html),
       currency:pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i])||''
@@ -1282,7 +1340,7 @@ function publicPrice_(id){
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
+      log_('PRICE_LOOKUP',id,'EMPTY','v9 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,description:fresh.description||cached.description||null,variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
