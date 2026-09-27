@@ -13,6 +13,7 @@ export type Product={
   currency?:string|null;
   description?:string|null;
   priceUpdatedAt?:string|null;
+  pickupPointCode?:string|null;
 };
 
 export const categories=["Semua","Charging & Cable"];
