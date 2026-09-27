@@ -816,6 +816,8 @@ export default function AdminPage(){
     }
   }
 
+  const detectedLinkCount=useMemo(()=>extractHttpLinks(text).length,[text]);
+
   const checks=useMemo(()=>{
     const detected=extractHttpLinks(text);
     const lines=importMode==="single"?detected.slice(0,1):detected;
@@ -1325,6 +1327,14 @@ export default function AdminPage(){
               :"Paste link sebanyak apa pun. Sistem otomatis memisahkan setiap URL yang diawali http/https."
             }
           />
+          {importMode==="multiple"&&<div
+            className="detected-link-counter"
+            aria-live="polite"
+            title="Jumlah link unik yang terdeteksi"
+          >
+            <strong>{detectedLinkCount}</strong>
+            <span>LINK</span>
+          </div>}
           <button
             type="button"
             className="paste-icon-btn"
