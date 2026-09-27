@@ -121,3 +121,67 @@ test('session fetch helpers stay inert in the Node Apps Script runtime',()=>{
  assert.equal(ctx.fetchJsonSession_('https://www.blibli.com/backend/test',product.canonicalUrl,session),null);
  assert.equal(ctx.fetchTextSession_(product.canonicalUrl,session),'');
 });
+
+
+test('browser-reader markdown parser extracts current Blibli product data',()=>{
+ const ctx=runtime();
+ const markdown=[
+  '# ACMIC CFC100 USB Type C Fast Charging Cable Kabel Data Charger [100 cm] - Red, - - [ACO-60021-00122]',
+  '',
+  '445 Ulasan',
+  '',
+  'Rp 21.000',
+  '',
+  'Rp 79.000 73%',
+  '',
+  'Terjual 2,5 rb',
+  '',
+  '## Warna:',
+  '',
+  '[TOSCA](https://example.test/tosca) [BLUE](https://example.test/blue) [Light Green](https://example.test/light-green) [Red](https://example.test/red) [Space Gray](https://example.test/space-gray)',
+  '',
+  '## Kode Produk:',
+  '',
+  '-',
+  '',
+  '## Deskripsi Produk',
+  '',
+  'Info Produk:',
+  '',
+  'ACMIC CFC100 Kabel Data Charger USB Type C',
+  'Panjang : 100cm',
+  '2A Fast Charging',
+  'Compatible with Qualcomm Quick Charge 3.0',
+  '',
+  '### Spesifikasi',
+  '',
+  'Brand ACMIC',
+  'Jenis Produk Kabel Data',
+  'Panjang Kabel 100cm',
+  'Tipe Garansi Garansi Resmi',
+  'Lama Garansi 2 Tahun',
+  '',
+  '## Ulasan'
+ ].join('\n');
+ const data=ctx.extractReaderProductData_(markdown,product);
+ assert.equal(data.price,'21000');
+ assert.equal(data.originalPrice,'79000');
+ assert.equal(data.discountPercent,'73%');
+ assert.equal(data.soldText,'Terjual 2,5 rb');
+ assert.match(data.description,/ACMIC CFC100/);
+ assert.equal(data.brand,'ACMIC');
+ assert.equal(data.category,'Kabel Data');
+ const warna=data.variants.find(x=>x.name==='Warna');
+ assert.ok(warna);
+ assert.equal(warna.selected,'Red');
+ assert.deepEqual(Array.from(warna.values,x=>x.name),['TOSCA','BLUE','Light Green','Red','Space Gray']);
+ assert.ok(data.specifications.some(x=>x.label==='Merk'&&x.value==='ACMIC'));
+ assert.ok(data.specifications.some(x=>x.label==='Jenis Produk'&&x.value==='Kabel Data'));
+});
+
+test('reader fallback is inert without Apps Script UrlFetchApp',()=>{
+ const ctx=runtime();
+ const data=ctx.readerProductData_(product);
+ assert.equal(data.price,'');
+ assert.deepEqual(Array.from(data.readerDiagnostics),[]);
+});

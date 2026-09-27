@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:12,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:13,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -341,28 +341,32 @@ function reloadFromBlibli_(p){
   const htmlPrice=domData.price||extractHtmlPrice_(html);
   const htmlCurrency=pick_(html,[/<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,/"priceCurrency"\s*:\s*"([^"]+)"/i]);
   const seoData=seoProductPageData_(Object.assign({},p,{id:id,name:title,canonicalUrl:canonical,pickupPointCode:pickupPointCode}));
-  const searchPrice=(!summary.price&&!htmlPrice&&!seoData.price)?searchPriceData_(id,title,canonical):{price:'',currency:''};
-  const freshPrice=normalizePrice_(summary.price||htmlPrice||seoData.price||searchPrice.price||'');
+  const readerNeeded=!summary.price&&!htmlPrice&&!seoData.price||!summary.description||!summary.variants.length||!summary.specifications.length;
+  const readerData=readerNeeded?readerProductData_(Object.assign({},p,{id:id,name:title,canonicalUrl:canonical,pickupPointCode:pickupPointCode})):emptyReaderData_();
+  if(isUsableProductTitle_(readerData.title))title=readerData.title;
+  const searchPrice=(!summary.price&&!htmlPrice&&!seoData.price&&!readerData.price)?searchPriceData_(id,title,canonical):{price:'',currency:''};
+  const freshPrice=normalizePrice_(summary.price||htmlPrice||seoData.price||readerData.price||searchPrice.price||'');
   const price=normalizePrice_(freshPrice||p.price||'');
-  const currency=(summary.currency||htmlCurrency||seoData.currency||searchPrice.currency||p.currency||(price?'IDR':'')).toUpperCase();
+  const currency=(summary.currency||htmlCurrency||seoData.currency||readerData.currency||searchPrice.currency||p.currency||(price?'IDR':'')).toUpperCase();
   const priceUpdatedAt=freshPrice?new Date().toISOString():(p.priceUpdatedAt||'');
   const htmlDescription=pick_(html,[
     /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i
   ]);
-  const description=cleanDescription_(domData.description||summary.description||seoData.description||htmlDescription||p.description||'');
+  const description=cleanDescription_(domData.description||summary.description||readerData.description||seoData.description||htmlDescription||p.description||'');
   const variants=normalizeVariants_(
     (domData.variants&&domData.variants.length?domData.variants:null)||
     (summary.variants&&summary.variants.length?summary.variants:null)||
+    (readerData.variants&&readerData.variants.length?readerData.variants:null)||
     (seoData.variants&&seoData.variants.length?seoData.variants:null)||
     p.variants||[]
   );
-  const specifications=normalizeSpecifications_((domData.specifications&&domData.specifications.length?domData.specifications:(summary.specifications&&summary.specifications.length?summary.specifications:p.specifications))||[]);
-  const soldText=cleanSoldText_(domData.soldText||summary.soldText||p.soldText||'');
-  const originalPrice=normalizePrice_(domData.originalPrice||summary.originalPrice||p.originalPrice||'');
-  const discountPercent=normalizeDiscountPercent_(domData.discountPercent||summary.discountPercent||p.discountPercent||'');
-  const brand=domData.brand||summary.brand||specValue_(specifications,'Merk')||p.brand||inferBrand_(title,id);
-  const category=domData.category||summary.category||specValue_(specifications,'Kategori')||p.category||'';
+  const specifications=normalizeSpecifications_((domData.specifications&&domData.specifications.length?domData.specifications:(summary.specifications&&summary.specifications.length?summary.specifications:(readerData.specifications&&readerData.specifications.length?readerData.specifications:p.specifications)))||[]);
+  const soldText=cleanSoldText_(domData.soldText||summary.soldText||readerData.soldText||p.soldText||'');
+  const originalPrice=normalizePrice_(domData.originalPrice||summary.originalPrice||readerData.originalPrice||p.originalPrice||'');
+  const discountPercent=normalizeDiscountPercent_(domData.discountPercent||summary.discountPercent||readerData.discountPercent||p.discountPercent||'');
+  const brand=domData.brand||summary.brand||readerData.brand||specValue_(specifications,'Merk')||p.brand||inferBrand_(title,id);
+  const category=domData.category||summary.category||readerData.category||specValue_(specifications,'Kategori')||p.category||'';
   if(!isUsableProductTitle_(title))title=p.name;
   return Object.assign({},p,{id:id,canonicalProductId:id,name:title,brand:brand,category:category,features:inferFeatures_(title),canonicalUrl:canonical,images:finalGallery,price:price,currency:currency,originalPrice:originalPrice,discountPercent:discountPercent,soldText:soldText,description:description,specifications:specifications,variants:variants,priceUpdatedAt:priceUpdatedAt,pickupPointCode:pickupPointCode,source:'blibli-reload'});
 }
@@ -890,6 +894,242 @@ function extractSummaryCommerce_(value){
     brand:specValue_(specifications,'Merk'),
     category:specValue_(specifications,'Kategori')
   };
+}
+function emptyReaderData_(){
+  return {title:'',price:'',currency:'',originalPrice:'',discountPercent:'',soldText:'',description:'',variants:[],specifications:[],brand:'',category:'',readerDiagnostics:[]};
+}
+function stripMarkdown_(value){
+  return decodeHtml_(String(value||''))
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g,'$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g,'$1')
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm,'')
+    .replace(/^[ \t]*[-*+][ \t]+/gm,'')
+    .replace(/[*_~]/g,'')
+    .replace(/&nbsp;/ig,' ')
+    .replace(/[ \t]+/g,' ')
+    .replace(/\n[ \t]+/g,'\n')
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
+}
+function readerSection_(text,startPatterns,stopPatterns){
+  const value=String(text||'');
+  let start=-1,startLen=0;
+  (startPatterns||[]).some(function(pattern){
+    const re=pattern instanceof RegExp?new RegExp(pattern.source,pattern.flags.replace('g','')):new RegExp(String(pattern),'i');
+    const m=re.exec(value);
+    if(m){start=m.index;startLen=m[0].length;return true}
+    return false;
+  });
+  if(start<0)return '';
+  const contentStart=start+startLen;
+  let end=value.length;
+  (stopPatterns||[]).forEach(function(pattern){
+    const re=pattern instanceof RegExp?new RegExp(pattern.source,pattern.flags.replace('g','')):new RegExp(String(pattern),'i');
+    const tail=value.slice(contentStart);
+    const m=re.exec(tail);
+    if(m&&contentStart+m.index<end)end=contentStart+m.index;
+  });
+  return value.slice(contentStart,end).trim();
+}
+function parseReaderVariants_(text,title){
+  const groups=[];
+  [
+    {name:'Warna',starts:[/(?:^|\n)#{1,6}\s*Warna\s*:?\s*(?:\n|$)/i,/(?:^|\n)Warna\s*:\s*(?:\n|$)/i],stops:[/(?:^|\n)#{1,6}\s*(?:Kode Produk|Deskripsi|Ukuran|Size|Kapasitas|Storage|Spesifikasi|Ulasan)\b/im]},
+    {name:'Ukuran',starts:[/(?:^|\n)#{1,6}\s*(?:Ukuran|Size)\s*:?\s*(?:\n|$)/i],stops:[/(?:^|\n)#{1,6}\s*(?:Kode Produk|Deskripsi|Warna|Kapasitas|Storage|Spesifikasi|Ulasan)\b/im]},
+    {name:'Kapasitas',starts:[/(?:^|\n)#{1,6}\s*(?:Kapasitas|Storage)\s*:?\s*(?:\n|$)/i],stops:[/(?:^|\n)#{1,6}\s*(?:Kode Produk|Deskripsi|Warna|Ukuran|Size|Spesifikasi|Ulasan)\b/im]}
+  ].forEach(function(def){
+    const section=readerSection_(text,def.starts,def.stops);
+    if(!section)return;
+    const values=[],seen={};
+    let m;
+    const linkRe=/\[([^\]]{1,100})\]\([^)]*\)/g;
+    while((m=linkRe.exec(section))){
+      const v=stripMarkdown_(m[1]).trim();
+      if(v&&!seen[v.toLowerCase()]){seen[v.toLowerCase()]=true;values.push(v)}
+    }
+    if(!values.length){
+      stripMarkdown_(section).split(/\n|\s*\|\s*|\s*,\s*/).forEach(function(raw){
+        const v=String(raw||'').replace(/^\d+[.)]\s*/,'').trim();
+        if(!v||v.length>80||/^kode produk/i.test(v))return;
+        const key=v.toLowerCase();
+        if(!seen[key]){seen[key]=true;values.push(v)}
+      });
+    }
+    if(def.name==='Warna'&&values.length===1){
+      const known=values[0].match(/(?:space\s+gr[ae]y|light\s+green|dark\s+blue|light\s+blue|rose\s+gold|midnight\s+blue|tosca|red|blue|green|black|white|gray|grey|pink|purple|yellow|orange|silver|gold)/ig);
+      if(known&&known.length>=2){
+        values.length=0;
+        Object.keys(seen).forEach(function(k){delete seen[k]});
+        known.forEach(function(v){const key=v.toLowerCase();if(!seen[key]){seen[key]=true;values.push(v)}})
+      }
+    }
+    if(!values.length)return;
+    let selected='';
+    const lowTitle=String(title||'').toLowerCase();
+    values.forEach(function(v){
+      if(!selected&&lowTitle.indexOf(String(v).toLowerCase())>=0)selected=v;
+    });
+    groups.push({
+      name:def.name,
+      selected:selected,
+      values:values.slice(0,30).map(function(v){return {name:v,image:'',selected:!!selected&&v===selected,outOfStock:false}})
+    });
+  });
+  return normalizeVariants_(groups);
+}
+function parseReaderSpecifications_(text){
+  const section=readerSection_(text,[
+    /(?:^|\n)#{1,6}\s*Spesifikasi\s*(?:\n|$)/i,
+    /(?:^|\n)Spesifikasi\s*:?\s*(?:\n|$)/i
+  ],[
+    /(?:^|\n)#{1,6}\s*(?:Ulasan|Review|Produk|Rekomendasi)\b/im
+  ]);
+  const rows=[];
+  function add(label,value){if(label&&value)rows.push({label:label,value:value})}
+  const visible=stripMarkdown_(section);
+  const prefixes=[
+    ['Brand','Merk'],['Merk','Merk'],['Kategori','Kategori'],['Jenis Produk','Jenis Produk'],
+    ['Panjang Kabel','Panjang Kabel'],['Tipe Garansi','Tipe Garansi'],['Lama Garansi','Lama Garansi'],
+    ['Detail Garansi','Detail Garansi'],['Model','Model'],['Material','Material'],['Warna','Warna']
+  ];
+  visible.split(/\n/).forEach(function(line){
+    const s=String(line||'').trim();
+    if(!s)return;
+    let matched=false;
+    prefixes.some(function(pair){
+      const prefix=String(pair[0]).replace(/[.*+?^$()|[\]\\]/g,'\\$&');
+      const re=new RegExp('^'+prefix+'\\s*:?\\s+(.+)$','i');
+      const m=s.match(re);
+      if(m){add(pair[1],m[1].trim());matched=true;return true}
+      return false;
+    });
+    if(!matched){
+      const m=s.match(/^([^:]{2,60})\s*:\s*(.{1,500})$/);
+      if(m)add(m[1].trim(),m[2].trim());
+    }
+  });
+  return normalizeSpecifications_(rows);
+}
+function extractReaderProductData_(text,p){
+  const raw=String(text||'');
+  const out=emptyReaderData_();
+  if(!raw)return out;
+
+  const heading=raw.match(/(?:^|\n)#\s+([^\n]{5,500})/);
+  if(heading)out.title=stripMarkdown_(heading[1]).replace(/\s*\[[A-Z0-9-]{5,}\]\s*$/i,'').trim();
+
+  const prices=[];
+  const priceRe=/(?:^|\n)\s*Rp\s*([0-9][0-9.]{2,})(?:\s|$)/ig;
+  let pm;
+  while((pm=priceRe.exec(raw))){
+    const price=normalizePrice_(pm[1]);
+    if(price&&prices.indexOf(price)<0)prices.push(price);
+    if(prices.length>=8)break;
+  }
+  if(prices.length){
+    out.price=prices[0];
+    for(let i=1;i<prices.length;i++){
+      if(Number(prices[i])>Number(out.price)){out.originalPrice=prices[i];break}
+    }
+  }
+
+  const discount=raw.match(/Rp\s*[0-9][0-9.]{2,}[ \t]+([0-9]{1,3})\s*%/i)||
+    raw.match(/(?:diskon|hemat)\s*([0-9]{1,3})\s*%/i);
+  if(discount)out.discountPercent=normalizeDiscountPercent_(discount[1]);
+  if(!out.discountPercent&&out.price&&out.originalPrice&&Number(out.originalPrice)>Number(out.price)){
+    out.discountPercent=normalizeDiscountPercent_(Math.round((Number(out.originalPrice)-Number(out.price))*100/Number(out.originalPrice)));
+  }
+
+  const sold=raw.match(/\bTerjual\s+([0-9][0-9.,]*\s*(?:rb|ribu|jt|juta)?)/i);
+  if(sold)out.soldText=cleanSoldText_('Terjual '+sold[1]);
+
+  out.variants=parseReaderVariants_(raw,out.title||p&&p.name||'');
+
+  let desc=readerSection_(raw,[/(?:^|\n)Info Produk\s*:\s*(?:\n|$)/i],[
+    /(?:^|\n)#{1,6}\s*Spesifikasi\b/im,
+    /(?:^|\n)#{1,6}\s*Ulasan\b/im
+  ]);
+  if(!desc){
+    desc=readerSection_(raw,[/(?:^|\n)#{1,6}\s*Deskripsi(?: Produk)?\s*(?:\n|$)/i],[
+      /(?:^|\n)#{1,6}\s*Spesifikasi\b/im,
+      /(?:^|\n)#{1,6}\s*Ulasan\b/im,
+      /(?:^|\n)#{1,6}\s*Dijual oleh\b/im
+    ]);
+  }
+  out.description=cleanDescription_(stripMarkdown_(desc));
+
+  out.specifications=parseReaderSpecifications_(raw);
+  let brand=specValue_(out.specifications,'Merk')||specValue_(out.specifications,'Brand');
+  if(!brand){
+    const m=stripMarkdown_(raw).match(/(?:^|\n)Merk\s*:?\s*([^\n]{1,100})/i);
+    if(m)brand=m[1].trim();
+  }
+  out.brand=brand||'';
+  out.category=specValue_(out.specifications,'Kategori')||specValue_(out.specifications,'Jenis Produk')||'';
+  out.currency=out.price?'IDR':'';
+  return out;
+}
+function readerProductData_(p){
+  const empty=emptyReaderData_();
+  const canonical=String(p&&p.canonicalUrl||p&&p.affiliateUrl||'').split('?')[0];
+  if(!/^https:\/\/(?:www\.)?blibli\.com\//i.test(canonical))return empty;
+  if(typeof UrlFetchApp==='undefined')return empty;
+
+  const id=String(p&&p.id||productId_(canonical)||'');
+  const cache=CacheService.getScriptCache();
+  const cacheKey='blibli-reader-v13-'+id;
+  if(id){
+    try{
+      const cached=cache.get(cacheKey);
+      if(cached){
+        const parsed=JSON.parse(cached);
+        parsed.readerDiagnostics=['reader:cache'];
+        return parsed;
+      }
+    }catch(e){}
+  }
+
+  const readerUrl='https://r.jina.ai/'+canonical;
+  const attempts=[{'X-Engine':'cf-browser-rendering'},{}];
+  let diagnostics=[];
+  for(let i=0;i<attempts.length;i++){
+    try{
+      const headers={
+        Accept:'application/json',
+        'X-Timeout':'30',
+        'X-Retain-Images':'none',
+        'X-Md-Link-Style':'inline',
+        'User-Agent':PRODUCT_FETCH_UAS[1]
+      };
+      Object.keys(attempts[i]).forEach(function(k){headers[k]=attempts[i][k]});
+      const r=UrlFetchApp.fetch(readerUrl,{muteHttpExceptions:true,followRedirects:true,headers:headers});
+      const code=r.getResponseCode();
+      const body=r.getContentText()||'';
+      diagnostics.push('reader'+i+':'+code+':'+body.length+'b');
+      if(code<200||code>=300||!body)continue;
+
+      let content=body;
+      try{
+        const json=JSON.parse(body);
+        content=recursiveScalarByKeys_(json,['content','markdown','text'])||body;
+      }catch(e){}
+      const data=extractReaderProductData_(content,p);
+      data.readerDiagnostics=diagnostics.slice();
+      if(data.price||data.description||data.variants.length||data.specifications.length){
+        if(id){
+          try{
+            const toCache=Object.assign({},data,{readerDiagnostics:[]});
+            cache.put(cacheKey,JSON.stringify(toCache),600);
+          }catch(cacheError){}
+        }
+        return data;
+      }
+    }catch(e){
+      diagnostics.push('reader'+i+':ERR:'+String(e&&e.message||e).slice(0,140));
+    }
+  }
+  empty.readerDiagnostics=diagnostics;
+  return empty;
 }
 function fetchTextFast_(url){
   const uas=[PRODUCT_FETCH_UAS[0],PRODUCT_FETCH_UAS[1]];
@@ -1864,6 +2104,16 @@ function refreshPriceForProduct_(p){
     if(priceData.price)priceSource='pdp';
   }
 
+  const readerNeeded=!priceData.price||!bestDescription||!bestVariants.length||
+    !cleanSoldText_(p.soldText||'')||!normalizeSpecifications_(p.specifications||[]).length;
+  const readerData=readerNeeded?readerProductData_(p):emptyReaderData_();
+  if(!priceData.price&&readerData.price){
+    priceData={price:readerData.price,currency:readerData.currency||'IDR'};
+    priceSource='reader';
+  }
+  if(readerData.description&&readerData.description.length>bestDescription.length)bestDescription=cleanDescription_(readerData.description);
+  if(readerData.variants&&readerData.variants.length>bestVariants.length)bestVariants=normalizeVariants_(readerData.variants);
+
   let richDom={price:'',originalPrice:'',discountPercent:'',soldText:'',description:'',variants:[],specifications:[]};
   if(!cleanSoldText_(p.soldText||'')||!normalizeSpecifications_(p.specifications||[]).length||!bestDescription||!bestVariants.length){
     const richHtml=fetchSeoText_(p.canonicalUrl||p.affiliateUrl,p.id);
@@ -1874,13 +2124,13 @@ function refreshPriceForProduct_(p){
   const price=normalizePrice_(priceData.price||richDom.price);
   const description=bestDescription;
   const variants=bestVariants;
-  const soldText=cleanSoldText_(richDom.soldText||summaryPriceData.soldText||p.soldText||'');
-  const originalPrice=normalizePrice_(richDom.originalPrice||summaryPriceData.originalPrice||p.originalPrice||'');
-  const discountPercent=normalizeDiscountPercent_(richDom.discountPercent||summaryPriceData.discountPercent||p.discountPercent||'');
-  const specifications=normalizeSpecifications_((richDom.specifications&&richDom.specifications.length?richDom.specifications:(summaryPriceData.specifications&&summaryPriceData.specifications.length?summaryPriceData.specifications:p.specifications))||[]);
-  const brand=richDom.brand||summaryPriceData.brand||specValue_(specifications,'Merk')||p.brand||'';
-  const category=richDom.category||summaryPriceData.category||specValue_(specifications,'Kategori')||p.category||'';
-  const fetchDiagnostics=(summaryPriceData.fetchDiagnostics||[]).join(' | ').slice(0,1200);
+  const soldText=cleanSoldText_(richDom.soldText||summaryPriceData.soldText||readerData.soldText||p.soldText||'');
+  const originalPrice=normalizePrice_(richDom.originalPrice||summaryPriceData.originalPrice||readerData.originalPrice||p.originalPrice||'');
+  const discountPercent=normalizeDiscountPercent_(richDom.discountPercent||summaryPriceData.discountPercent||readerData.discountPercent||p.discountPercent||'');
+  const specifications=normalizeSpecifications_((richDom.specifications&&richDom.specifications.length?richDom.specifications:(summaryPriceData.specifications&&summaryPriceData.specifications.length?summaryPriceData.specifications:(readerData.specifications&&readerData.specifications.length?readerData.specifications:p.specifications)))||[]);
+  const brand=richDom.brand||summaryPriceData.brand||readerData.brand||specValue_(specifications,'Merk')||p.brand||'';
+  const category=richDom.category||summaryPriceData.category||readerData.category||specValue_(specifications,'Kategori')||p.category||'';
+  const fetchDiagnostics=(summaryPriceData.fetchDiagnostics||[]).concat(readerData.readerDiagnostics||[]).join(' | ').slice(0,1200);
 
   if(!price){
     return Object.assign({},p,{
@@ -1962,7 +2212,7 @@ function publicPrice_(id){
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','v12 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · '+(fresh.lastFetchDiagnostics||'semua sumber harga kosong'));
+      log_('PRICE_LOOKUP',id,'EMPTY','v13 · pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · '+(fresh.lastFetchDiagnostics||'semua sumber harga kosong'));
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,originalPrice:fresh.originalPrice||cached.originalPrice||null,discountPercent:fresh.discountPercent||cached.discountPercent||null,soldText:fresh.soldText||cached.soldText||null,description:fresh.description||cached.description||null,specifications:Array.isArray(fresh.specifications)?fresh.specifications:(cached.specifications||[]),variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
