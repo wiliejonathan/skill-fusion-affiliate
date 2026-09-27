@@ -1311,7 +1311,12 @@ function scheduledRefreshPrices(){
       const current=products[index];
       try{
         const fresh=refreshPriceForProduct_(current);
-        if(normalizePrice_(fresh.price)){
+        const metadataChanged=
+          (fresh.pickupPointCode&&fresh.pickupPointCode!==current.pickupPointCode)||
+          (fresh.description&&fresh.description!==current.description)||
+          (JSON.stringify(fresh.variants||[])!==JSON.stringify(current.variants||[]));
+
+        if(normalizePrice_(fresh.price)||metadataChanged){
           upsert_(DRAFT_SHEET,fresh);
           upsert_(PUBLISHED_SHEET,fresh);
           updated++;
