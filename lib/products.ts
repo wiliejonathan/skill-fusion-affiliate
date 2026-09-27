@@ -20,16 +20,16 @@ export type Product={
 };
 
 export const PRODUCT_CATEGORY_ORDER=[
-  "Kabel Data & Charging",
-  "Charger & Adapter",
-  "Power Bank",
   "Smartphone",
   "Feature Phone",
   "Tablet",
-  "TWS & Earbuds",
-  "Earphone Kabel",
   "Smartwatch",
   "Smartband",
+  "TWS & Earbuds",
+  "Earphone Kabel",
+  "Power Bank",
+  "Charger & Adapter",
+  "Kabel Data & Charging",
   "Baterai HP",
   "Aksesori Smartwatch",
   "Aksesori TWS",
