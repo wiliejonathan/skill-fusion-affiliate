@@ -235,6 +235,11 @@ function processImportQueueBatch_(maxItems,maxMs,scheduleRemaining,source){
     if(typeof LockService!=='undefined'){
       lock=LockService.getScriptLock();
       if(!lock.tryLock(1200)){
+        // A background trigger can collide with an active foreground kick.
+        // Reschedule it instead of losing the fallback worker.
+        if(scheduleRemaining){
+          try{scheduleImportTrigger_()}catch(ignore){}
+        }
         return importJobView_(readImportJob_());
       }
     }
