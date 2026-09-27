@@ -16,16 +16,12 @@
       <a href="#products">Products</a>
       <a href="./">Client Website</a>
     </nav>
-    <div class="sidebar-note">Draft dan Published dipisahkan. Reload tidak langsung mengubah Client.</div>
+    <div class="sidebar-note">Admin hanya mengelola data katalog yang stabil. Harga, stok, diskon, dan varian dicek langsung di Blibli.</div>
   </aside>
 
   <main class="admin-main">
     <header id="dashboard" class="admin-header">
-      <div><span class="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Google Sheets menjadi database. Apps Script menjadi API. GitHub Pages menjadi website.</p></div>
-      <div class="dashboard-actions">
-        <button id="refreshAllBtn" class="btn secondary">↻ Refresh Data All</button>
-        <button id="reloadAllBtn" class="btn primary">⟳ Reload All</button>
-      </div>
+      <div><span class="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Kelola identitas produk, foto katalog, kategori, fitur, dan link affiliate. Data live-commerce tetap dicek di Blibli.</p></div>
     </header>
 
     <section class="stats">
@@ -50,7 +46,7 @@
     </section>
 
     <section id="products" class="panel">
-      <div class="panel-title"><div><span class="eyebrow">PRODUCTS</span><h2>Katalog Draft</h2><p><b>Reload DOM</b> = Blibli → Draft. <b>Refresh Data</b> = Draft → Published/Client.</p></div></div>
+      <div class="panel-title"><div><span class="eyebrow">PRODUCTS</span><h2>Katalog Draft</h2><p>Admin dan Client menampilkan field katalog yang stabil. Harga, stok, diskon, varian, dan detail penawaran dibuka langsung di Blibli.</p></div></div>
       <div id="adminProducts" class="admin-products"></div>
     </section>
 
