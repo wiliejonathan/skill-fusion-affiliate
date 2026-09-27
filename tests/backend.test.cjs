@@ -143,11 +143,11 @@ test('stale running N/N import job self-heals to completed',()=>{
 });
 
 
-test('product category classifier separates cable, power bank and wearable products',()=>{
+test('product category classifier uses exact product-type filters',()=>{
  const {ctx}=setup();
  assert.equal(
   ctx.inferCategory_('UGREEN kabel data iPhone type c to lightning fast charging','Charging & Cable',[]),
-  'Charging & Cable'
+  'Kabel Data & Charging'
  );
  assert.equal(
   ctx.inferCategory_('ANKER Zolo portable power bank 20000mAh built in type c cable','Charging & Cable',[]),
@@ -155,10 +155,42 @@ test('product category classifier separates cable, power bank and wearable produ
  );
  assert.equal(
   ctx.inferCategory_('GARMIN Forerunner 165 Black Slate','Charging & Cable',[]),
-  'Smartwatch & Wearable'
+  'Smartwatch'
  );
  assert.equal(
-  ctx.inferCategory_('UGREEN 65W GaN Wall Charger USB C','Charging & Cable',[]),
+  ctx.inferCategory_('SAMSUNG Galaxy FIT3 smart band bluetooth','Charging & Cable',[]),
+  'Smartband'
+ );
+ assert.equal(
+  ctx.inferCategory_('FINCHY Ocean Strap Garmin Venu 2S tali jam smartwatch','Charging & Cable',[]),
+  'Aksesori Smartwatch'
+ );
+ assert.equal(
+  ctx.inferCategory_('XIAOMI earphone tipe c plug and play ergonomis','Charging & Cable',[]),
+  'Earphone Kabel'
+ );
+ assert.equal(
+  ctx.inferCategory_('OPPO enco x earphone wireless bluetooth','Charging & Cable',[]),
+  'TWS & Earbuds'
+ );
+ assert.equal(
+  ctx.inferCategory_('INFINIX charger kit XC33 33W gan charger type c to c','Charging & Cable',[]),
   'Charger & Adapter'
+ );
+ assert.equal(
+  ctx.inferCategory_('SAMSUNG galaxy A17 5G smartphone 8 256GB travel adaptor 25W','Charging & Cable',[]),
+  'Smartphone'
+ );
+ assert.equal(
+  ctx.inferCategory_('SAMSUNG galaxy tab A11 4 64GB','Charging & Cable',[]),
+  'Tablet'
+ );
+ assert.equal(
+  ctx.inferCategory_('BATERAI hippo iphone 11 3530 mah garansi resmi','Charging & Cable',[]),
+  'Baterai HP'
+ );
+ assert.equal(
+  ctx.inferCategory_('NOKIA 105 garansi resmi','Charging & Cable',[]),
+  'Feature Phone'
  );
 });

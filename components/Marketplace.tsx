@@ -5,7 +5,7 @@ import {ArrowRight,AtSign,Cpu,Filter,Heart,Search,ShieldCheck,Sparkles,X,Zap} fr
 import Link from "next/link";
 import BrandLogo from "./BrandLogo";
 import ProductCard from "./ProductCard";
-import {getAvailableProductCategories,inferProductCategory,type Product} from "@/lib/products";
+import {getAvailableProductCategories,getProductCategoryCounts,inferProductCategory,type Product} from "@/lib/products";
 import {useSyncedProducts} from "@/lib/useSyncedProducts";
 import {readWishlist,toggleWishlistId} from "@/lib/wishlist";
 
@@ -43,6 +43,11 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
     [classifiedProducts]
   );
 
+  const categoryCounts=useMemo(
+    ()=>getProductCategoryCounts(classifiedProducts),
+    [classifiedProducts]
+  );
+
   useEffect(()=>{
     if(category!=="Semua"&&!availableCategories.includes(category)){
       setCategory("Semua");
@@ -73,7 +78,9 @@ export default function Marketplace({initialProducts}:{initialProducts:Product[]
     <div className="filter-section">
       <div className="category-list">
         {availableCategories.map((item,i)=><button key={item} className={category===item?"category-item active":"category-item"} onClick={()=>{setCategory(item);setMobileFilters(false)}}>
-          <span className="cat-index">0{i+1}</span><span>{item}</span>
+          <span className="cat-index">{String(i+1).padStart(2,"0")}</span>
+          <span className="cat-label">{item}</span>
+          <span className="cat-count">{categoryCounts[item]||0}</span>
         </button>)}
       </div>
     </div>
