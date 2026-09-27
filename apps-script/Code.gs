@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:21,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:22,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -3141,32 +3141,46 @@ function pick_(text,patterns){for(let i=0;i<patterns.length;i++){const m=String(
 function unique_(arr){return Array.from(new Set((arr||[]).filter(Boolean)))}
 function inferBrand_(title,id){const u=String(title||'').toUpperCase();if(u.indexOf('XIAOMI')===0||String(id).indexOf('XIO-')===0)return 'XIAOMI';if(u.indexOf('ACMIC')===0||String(id).indexOf('ACO-')===0)return 'ACMIC';return String(title||'TECH').split(/\s+/)[0].toUpperCase()}
 function inferCategory_(title,storedCategory,specifications){
-  const name=String(title||'').toLowerCase();
-  const stored=String(storedCategory||specValue_(specifications||[],'Kategori')||'').toLowerCase();
-  const text=name.replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
+  const text=String(title||'').toLowerCase().replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
+  const watchContext=/\b(watch|smartwatch|smart\s*band|smartband|garmin|fit\s*3|fit3|venu|gt\s*6|gt6|iwatch)\b/i.test(text);
+  const accessory=/\b(strap|wristband|tali\s+jam|screen\s*protector|anti\s+gores|tempered\s+glass|case|casing|cover|bumper)\b/i.test(text);
 
-  if(/\b(power\s*bank|powerbank|battery\s*pack|portable\s+charger)\b/i.test(text))return 'Power Bank';
-  if(/\b(smart\s*watch|smartwatch|fitness\s*(?:band|tracker)|forerunner|apple\s*watch|galaxy\s*watch|amazfit|smart\s*band|garmin\s+(?:venu|vivo|instinct|fenix|epix))\b/i.test(text))return 'Smartwatch & Wearable';
-  if(/\b(earbuds?|earphones?|headphones?|headsets?|tws|speaker|soundbar|microphone|audio)\b/i.test(text))return 'Audio';
-  if(/\b(smart\s*home|smart\s*plug|smart\s*bulb|ip\s*camera|cctv|doorbell|robot\s*vacuum|vacuum\s*cleaner|air\s*purifier|smart\s*sensor)\b/i.test(text))return 'Smart Home';
-  if(/\b(router|wi-?fi|modem|mesh\s*wifi|ethernet|network\s*switch|ssd|hdd|hard\s*drive|flash\s*drive|usb\s*drive|micro\s*sd|memory\s*card|nas\b)\b/i.test(text))return 'Networking & Storage';
-  if(/\b(keyboard|mouse|monitor|laptop|notebook|webcam|gamepad|controller|usb\s*hub|type\s*c\s*hub|docking\s*station)\b/i.test(text))return 'Computer & Peripheral';
-  if(/\b(kabel|cable|braided\s+line|data\s+charger|data\s+cable|lightning\s+cable|usb\s*[ac]\s*to|usb-?[ac]\s*to|type\s*-?c\s*to|c\s*to\s*c)\b/i.test(text))return 'Charging & Cable';
-  if(/\b(gan\s*charger|wall\s*charger|travel\s*charger|wireless\s*charger|charging\s*station|charging\s*dock|car\s*charger|power\s*adapter|power\s*adaptor|adapter|adaptor|kepala\s*charger)\b/i.test(text))return 'Charger & Adapter';
-  if(/\b(smartphone|handphone|mobile\s+phone|iphone\b|ipad\b|tablet\b|galaxy\s+[asz]\d|redmi\s+note|poco\s+[a-z0-9])\b/i.test(text))return 'Smartphone & Tablet';
-  if(/\b(case|casing|cover|holder|stand|mount|screen\s*protector|tempered\s*glass|strap|stylus|sleeve|pouch)\b/i.test(text))return 'Tech Accessories';
+  if(accessory&&watchContext)return 'Aksesori Smartwatch';
+  if(/\b(case|casing|cover)\b/i.test(text)&&/\b(tws|airpods?|earbuds?|buds\b|earphone)\b/i.test(text))return 'Aksesori TWS';
+  if(/\b(wrist\s+strap|phone\s+strap|casetify)\b/i.test(text))return 'Aksesori Smartphone';
 
-  if(/power\s*bank/i.test(stored))return 'Power Bank';
-  if(/watch|wearable|fitness/i.test(stored))return 'Smartwatch & Wearable';
-  if(/audio|earphone|headphone|speaker/i.test(stored))return 'Audio';
-  if(/smartphone|handphone|tablet/i.test(stored))return 'Smartphone & Tablet';
-  if(/smart\s*home|home\s*appliance/i.test(stored))return 'Smart Home';
-  if(/network|storage|router|ssd|memory/i.test(stored))return 'Networking & Storage';
-  if(/computer|peripheral|keyboard|mouse|laptop/i.test(stored))return 'Computer & Peripheral';
-  if(/charger|adapter|adaptor/i.test(stored)&&!/cable|kabel/i.test(stored))return 'Charger & Adapter';
-  if(/cable|kabel/i.test(stored))return 'Charging & Cable';
-  if(/accessor/i.test(stored))return 'Tech Accessories';
-  return 'Other Tech';
+  if(/\b(power\s*bank|powerbank|portable\s+power\s+bank)\b/i.test(text))return 'Power Bank';
+  if(/\b(galaxy\s+tab|redmi\s+pad|poco\s+pad|xpad|motopad|tablet|ipad\b|pad\s+se\b|pad\s+2\b|tab\s+s\d|tab\s+a\d)\b/i.test(text))return 'Tablet';
+
+  if(/\bearphone\b/i.test(text)&&!/\b(tws|wireless|bluetooth|buds|freebuds|freeclip|airpods)\b/i.test(text))return 'Earphone Kabel';
+  if(/\b(airpods?|earbuds?|headset|tws|buds\b|freebuds|freeclip|enco\s+buds|soundcore\s+r\d+i|wireless\s+earphone|bluetooth\s+earphone)\b/i.test(text)||/\bearphone\b.*\b(wireless|bluetooth)\b/i.test(text))return 'TWS & Earbuds';
+
+  if(/\b(smartband|smart\s*band|galaxy\s+fit|huawei\s+band)\b/i.test(text))return 'Smartband';
+  if(/\b(smartwatch|smart\s*watch|watch\s+fit|watch\s+gt|redmi\s+watch|gt\s+watch|forerunner)\b/i.test(text))return 'Smartwatch';
+
+  if(/\b(baterai|battery|batre|batrai|batrei)\b/i.test(text))return 'Baterai HP';
+  if(/\b(nokia\s+(?:105|110|150)|feature\s*phone|handphone\s+jadul)\b/i.test(text))return 'Feature Phone';
+
+  const smartphoneModel=
+    /\b(smartphone|hp\s+oppo|galaxy\s+(?:a|s)\d{1,2}\b|poco\s+[xc]\d|redmi\s+a\d|realme\s+(?:c|note|p)\d|oppo\s+a\d|huawei\s+pura\s+\d|pura\s+\d{2}|villaon\s+v\d)\b/i.test(text)
+    ||/\binfinix\s+(?:hot|smart|note)\s*\d+/i.test(text);
+  const smartphoneSpec=
+    /\b(?:4|6|8|12)\s*(?:gb)?\s+(?:64|128|256|512)\s*(?:gb)?\b/i.test(text)
+    ||/\b(?:64|128|256|512)\s*gb\b/i.test(text);
+  if(
+    smartphoneModel||
+    (smartphoneSpec&&/\b(infinix|realme|poco|redmi|xiaomi|oppo|samsung|huawei|villaon|galaxy)\b/i.test(text))
+  )return 'Smartphone';
+
+  if(/\b(travel\s+adapter|wall\s+charger|kepala\s+charger|charger\s+kit|gan\s+charger|adaptor|adapter|charger\s+super\s+fast|super\s+fast\s+charging\s+\d+w)\b/i.test(text))return 'Charger & Adapter';
+  if(/\b(kabel|cable|charging\s+cable|data\s+cable|usb\s+[ac]\s+to|type\s*c\s+to|lightning\s+cable)\b/i.test(text))return 'Kabel Data & Charging';
+
+  if(accessory)return 'Aksesori Smartphone';
+
+  // Keep the database readable even when a new product type has not yet been
+  // assigned a dedicated Skill Fusion filter.
+  const stored=String(storedCategory||specValue_(specifications||[],'Kategori')||'').trim();
+  return stored&&stored!=='Charging & Cable'?stored:'Lainnya';
 }
 
 function inferFeatures_(title){const v=String(title||'').toLowerCase(),f=[];if(/100\s*cm/.test(v))f.push('100 cm');if(/type\s*-?\s*c|usb\s*c/.test(v))f.push('USB Type-C');if(/power delivery|\bpd\b/.test(v))f.push('Power Delivery');else if(/fast\s*charging|6a/.test(v))f.push('Fast charging');return f.length?f:['Blibli Affiliate']}
