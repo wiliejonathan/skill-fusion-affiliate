@@ -775,27 +775,8 @@ export default function AdminPage(){
         let saveData=await saveRes.json();
         if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Database sync awal gagal.");
 
-        // AUTO RELOAD DOM: every successful import automatically performs the
-        // same reload operation as the manual button before we call it finished.
-        setNotice(`Import ${index+1}/${ready.length} · Auto Reload DOM sedang membaca semua foto produk...`);
-        const source=validBlibliSource(data.canonicalUrl,data.finalUrl,item.inputUrl);
-        if(source){
-          try{
-            const reloadRes=await fetch(
-              "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now()+"-"+index,
-              {cache:"no-store"}
-            );
-            const reloadData:ResolvedProduct=await reloadRes.json();
-            if(reloadRes.ok&&reloadData?.ok){
-              const merged=mergeReloadedProduct(item.inputUrl,reloadData,candidateCatalog,candidateResolved);
-              candidateCatalog=merged.catalog;
-              candidateResolved=merged.resolved;
-            }
-          }catch{
-            // Final image validation below decides whether the import may remain.
-          }
-        }
-
+        // The resolver result is the authoritative import payload. Cloud live-commerce
+        // scraping is intentionally not retried here because Blibli blocks it.
         const finalProduct=buildDbProducts(candidateCatalog,candidateResolved)
           .find(product=>product.affiliateUrl===item.inputUrl);
 
@@ -807,8 +788,7 @@ export default function AdminPage(){
           throw new Error("Foto produk belum berhasil dibaca otomatis. Import dibatalkan agar katalog tidak menyimpan produk tanpa gambar.");
         }
 
-        // Publish the fully reloaded gallery immediately. No separate manual
-        // Reload DOM / Refresh Data step is required after import.
+        // Publish the available catalog fields immediately.
         saveRes=await fetch("/api/catalog",{
           method:"POST",
           headers:{"content-type":"application/json"},
@@ -841,15 +821,15 @@ export default function AdminPage(){
 
     if(imported){
       setNotice(
-        `✓ ${imported} produk berhasil di-import · Auto Reload DOM selesai · foto langsung tersedia di Admin dan Client.`+
+        `✓ ${imported} produk berhasil di-import dan langsung tersedia di Admin + Client.`+
         (resolvedDuplicates?` ${resolvedDuplicates} duplicate Product ID diblokir.`:"")+
         (failedImports?` ${failedImports} link gagal.`:"")
       );
     }else if(resolvedDuplicates){
       setNotice(`Tidak ada produk baru. ${resolvedDuplicates} link ternyata mengarah ke Product ID yang sudah ada, jadi duplicate otomatis diblokir.`);
     }else{
-      const detail=failedMessages[0]||"Metadata atau gallery Blibli belum dapat dibaca.";
-      setNotice("Import gagal [Auto DOM]: "+detail);
+      const detail=failedMessages[0]||"Identitas atau foto katalog belum dapat dibaca.";
+      setNotice("Import gagal: "+detail);
     }
 
     setBusy(false);
@@ -1176,27 +1156,10 @@ export default function AdminPage(){
 
     <section className="content">
       <header id="dashboard">
-        <div><span className="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Kelola produk Blibli yang benar-benar kamu masukkan. Tidak ada produk demo.</p></div>
+        <div><span className="eyebrow">CATALOG CONTROL CENTER</span><h1>Skill Fusion Admin</h1><p>Kelola hanya data katalog yang stabil: identitas produk, foto, kategori, fitur, dan link affiliate.</p></div>
         <div className="header-controls">
-          <div className="dashboard-actions">
-            <button
-              className="dashboard-action refresh-all"
-              onClick={refreshDataAll}
-              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null}
-            >
-              <RefreshCw size={16}/>
-              {bulkAction==="refresh"?"Refreshing All...":"Refresh Data All"}
-            </button>
-            <button
-              className="dashboard-action reload-all"
-              onClick={reloadAll}
-              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null}
-            >
-              <PackageSearch size={16}/>
-              {bulkAction==="reload"?"Reloading All...":"Reload All"}
-            </button>
-          </div>
-          <button className="admin-logout" onClick={logoutAdmin}>Logout</button><div className="pill">ADMIN</div>
+          <div className="pill">STABLE CATALOG</div>
+          <button className="admin-logout" onClick={logoutAdmin}>Logout</button>
         </div>
       </header>
 
@@ -1208,7 +1171,7 @@ export default function AdminPage(){
       </div>
 
       <section className="panel" id="import">
-        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Produk yang berhasil di-import langsung disimpan ke database bersama dan muncul di Client.</p></div><CopyCheck size={24}/></div>
+        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Produk yang berhasil di-import langsung disimpan ke database bersama. Harga, stok, diskon, dan varian tetap dicek di Blibli.</p></div><CopyCheck size={24}/></div>
 
         <div className="import-mode-bar">
           <button
@@ -1275,7 +1238,7 @@ export default function AdminPage(){
       </section>}
 
       <section className="panel" id="products">
-        <div className="panel-title"><div><span className="eyebrow">PRODUCTS</span><h2>Katalog aktif</h2><p>Katalog ini adalah sumber yang sama dengan website Client.</p></div></div>
+        <div className="panel-title"><div><span className="eyebrow">PRODUCTS</span><h2>Katalog aktif</h2><p>Admin dan Client memakai data katalog yang sama. Field live-commerce yang diblokir Blibli tidak ditampilkan.</p></div></div>
         <div className="product-admin-list">
           {[...catalog].sort((a,b)=>(b.sequence||0)-(a.sequence||0)).map((item,i)=>{
             const url=item.affiliateUrl||"";
@@ -1288,39 +1251,15 @@ export default function AdminPage(){
                 {meta?.images?.length?<div className="admin-gallery">
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
                 </div>:null}
-                {meta?.images?.length?<small>{meta.images.length} foto produk berhasil ditemukan</small>:<small>Foto belum terbaca — gunakan Reload DOM</small>}
-                <div className="admin-price-box">
-                  <span>LIVE PRICE</span>
-                  <b>{formatAdminPrice(meta?.price,meta?.currency)||"Belum ada harga tersimpan"}</b>
-                  <small>{formatAdminPriceAge(meta?.priceUpdatedAt)}</small>
-                </div>
-                <div className="admin-meta-data">
-                  <small><strong>Deskripsi:</strong> {meta?.description?"Tersimpan":"Belum terbaca"}</small>
-                  {meta?.variants?.length?<div className="admin-variant-list">
-                    {meta.variants.map(group=><div key={group.name}><b>{group.name}</b><span>{group.values.join(" · ")}</span></div>)}
-                  </div>:<small><strong>Varian:</strong> Belum terbaca</small>}
+                {meta?.images?.length?<small>{meta.images.length} foto katalog tersedia</small>:<small>Foto katalog belum tersedia</small>}
+                <div className="admin-meta-data stable-fields">
+                  <small><strong>Data tampil:</strong> nama produk · brand · kategori · foto · fitur · Product ID · link affiliate</small>
+                  <small><strong>Dicek di Blibli:</strong> harga · diskon · stok · varian · detail penawaran</small>
                 </div>
                 <div className="admin-product-actions">
                   <a href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Buka Produk di Blibli</a>
-                  <button
-                    className={reloadingUrl===url?"reload-dom-btn refreshing":"reload-dom-btn"}
-                    onClick={()=>reloadDomProduct(url)}
-                    disabled={refreshingUrl!==null||reloadingUrl!==null||bulkAction!==null}
-                  >
-                    <PackageSearch size={15}/>
-                    {reloadingUrl===url?"Reloading DOM...":"Reload DOM"}
-                  </button>
-                  <button
-                    className={refreshingUrl===url?"refresh-btn refreshing":"refresh-btn"}
-                    onClick={()=>refreshProduct(url)}
-                    disabled={refreshingUrl!==null||reloadingUrl!==null||bulkAction!==null}
-                  >
-                    <RefreshCw size={15}/>
-                    {refreshingUrl===url?"Refreshing...":"Refresh Data"}
-                  </button>
-                  <button onClick={()=>removeLink(url)} disabled={refreshingUrl===url||reloadingUrl===url||bulkAction!==null}><Trash2 size={15}/>Hapus</button>
+                  <button onClick={()=>removeLink(url)} disabled={busy}><Trash2 size={15}/>Hapus</button>
                 </div>
-                {productNotice[url]?<div className={productNotice[url].includes("gagal")?"product-refresh-status error":"product-refresh-status"}>{productNotice[url]}</div>:null}
               </div>
             </article>
           })}
