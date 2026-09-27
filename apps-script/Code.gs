@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:15,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:16,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{disableLegacyPriceRefreshTriggers_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -64,7 +64,7 @@ function doPost(e){
     const action=String(p.action||'');
     if(action==='draft')return output_({ok:true,products:readProducts_(DRAFT_SHEET)});
     if(action==='resolve')return output_(resolveProduct_(String(p.url||'')));
-    if(['savePublish','reloadDom','reload','reloadAll','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
+    if(['savePublish','reloadDom','reload','reloadAll','repairMissingImages','publish','publishAll','delete'].indexOf(action)<0)throw new Error('Action tidak dikenal');
     lock=LockService.getScriptLock();
     if(!lock.tryLock(30000))throw new Error('Database sedang diproses. Coba lagi.');
     let out;
@@ -72,6 +72,7 @@ function doPost(e){
     else if(action==='reloadDom')out=reloadDom_(String(p.url||''));
     else if(action==='reload')out=reloadOne_(String(p.id||''));
     else if(action==='reloadAll')out=reloadAll_();
+    else if(action==='repairMissingImages')out=repairMissingImages_();
     else if(action==='publish')out=publishOne_(String(p.id||''));
     else if(action==='publishAll')out=publishAll_();
     else out=deleteOne_(String(p.id||''));
@@ -118,11 +119,35 @@ function resolveProduct_(url){
     specifications:[]
   };
 
-  const p=reloadFromBlibli_(seed);
+  seed.pickupPointCode=pickupPointCode_(resolved.finalUrl||'');
+  let p=Object.assign({},seed);
+
+  // Fast import path: resolve image without running the full PDP reload chain.
+  // This keeps multi-link imports responsive even when Blibli's PDP is blocked.
+  let fastImages=fastImageGallery_(p);
+  if(fastImages.length){
+    p.images=fastImages;
+    p.source='fast-image-resolver';
+    log_('IMAGE_RESOLVE',id,'OK',fastImages.length+' foto · fast');
+  }else{
+    // Heavy Blibli reload is a last resort for this single product only.
+    p=reloadFromBlibli_(seed);
+  }
+
   if(!isUsableProductTitle_(p.name))p.name=titleFromUrl_(canonical);
 
-  // Product ID + canonical URL are enough to import. Gallery can be completed by
-  // the same reload pipeline after import instead of blocking the whole product.
+  // A final indexed lookup is cheap and prevents a successful import from
+  // returning an empty gallery when Blibli's own endpoints are blocked.
+  if(!p.images||!p.images.length){
+    p.images=indexedImageSearch_(p);
+    if(p.images.length){
+      p.source='indexed-image-resolver';
+      log_('IMAGE_RESOLVE',id,'OK',p.images.length+' foto · indexed');
+    }else{
+      log_('IMAGE_RESOLVE',id,'EMPTY','tidak ada image fallback');
+    }
+  }
+
   return resolvedShape_(p,url);
 }
 function reloadDom_(url){
@@ -2407,6 +2432,205 @@ function rankProductImages_(images,id){
   });
   rows.sort((a,b)=>b.score-a.score||a.index-b.index);
   return rows.map(x=>x.url);
+}
+function parseIndexedImageUrls_(html){
+  const value=decodeHtml_(html||'').replace(/\\u002F/ig,'/').replace(/\\\//g,'/');
+  const out=[];
+  function add(raw){
+    let url=String(raw||'').trim();
+    try{url=decodeURIComponent(url)}catch(e){}
+    url=decodeHtml_(url).replace(/\\u002F/ig,'/').replace(/\\\//g,'/');
+    if(/^http:\/\//i.test(url))url=url.replace(/^http:/i,'https:');
+    if(!/^https:\/\//i.test(url)||!imageLooksUseful_(url))return;
+    if(/(?:bing\.net\/th|bing\.com\/th|microsoft\.com\/th)/i.test(url))return;
+    if(out.indexOf(url)<0)out.push(url);
+  }
+
+  let m;
+  const direct=/"(?:murl|mediaurl|contentUrl|imageUrl)"\s*:\s*"(https?:[^"]+)"/ig;
+  while((m=direct.exec(value)))add(m[1]);
+
+  const encoded=/(?:murl|mediaurl|contentUrl|imageUrl)(?:&quot;|")?\s*:\s*(?:&quot;|")([^"&]+)(?:&quot;|")/ig;
+  while((m=encoded.exec(html||'')))add(m[1]);
+
+  return out;
+}
+function indexedImageScore_(url,p){
+  const low=String(url||'').toLowerCase();
+  let score=0;
+  if(/static-src\.com\/wcsstore\/indraprastha\/images\/catalog\//i.test(low))score+=1000;
+  if(/(?:acmic\.id|anker\.com|ugreen\.com|baseus\.com|delcell\.id|xiaomi\.com|mi\.com)/i.test(low))score+=500;
+  if(/(?:susercontent\.com|shopee\.|tokopedia|amazon|cdn|product|catalog|image)/i.test(low))score+=100;
+  if(/(?:logo|icon|sprite|avatar|banner|placeholder|favicon)/i.test(low))score-=1000;
+
+  const brand=String(p&&p.brand||inferBrand_(p&&p.name||'',p&&p.id||'')).toLowerCase();
+  if(brand&&low.indexOf(brand.replace(/[^a-z0-9]/g,''))>=0)score+=80;
+
+  return score;
+}
+function indexedImageQueries_(p){
+  const title=String(p&&p.name||'').replace(/[\r\n]+/g,' ').trim();
+  const id=String(p&&p.id||'').trim();
+  const shortTitle=title.split(/\s+/).slice(0,12).join(' ');
+  return unique_([
+    [id,shortTitle].filter(Boolean).join(' '),
+    title
+  ].filter(Boolean));
+}
+function indexedImageSearch_(p){
+  if(typeof UrlFetchApp==='undefined')return [];
+  const queries=indexedImageQueries_(p).slice(0,2);
+  if(!queries.length)return [];
+
+  const requests=queries.map(function(q){
+    return {
+      url:'https://www.bing.com/images/search?q='+encodeURIComponent(q)+'&form=HDRSC2&first=1',
+      method:'get',
+      muteHttpExceptions:true,
+      followRedirects:true,
+      headers:{
+        Accept:'text/html,application/xhtml+xml',
+        'Accept-Language':'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+        'User-Agent':PRODUCT_FETCH_UAS[1]
+      }
+    };
+  });
+
+  let responses=[];
+  try{
+    responses=typeof UrlFetchApp.fetchAll==='function'
+      ? UrlFetchApp.fetchAll(requests)
+      : requests.map(function(req){return UrlFetchApp.fetch(req.url,req)});
+  }catch(e){return []}
+
+  let images=[];
+  responses.forEach(function(response){
+    try{
+      if(response.getResponseCode()<200||response.getResponseCode()>=400)return;
+      images=images.concat(parseIndexedImageUrls_(response.getContentText()||''));
+    }catch(e){}
+  });
+
+  const seen={};
+  return images
+    .map(function(url,index){return {url:normalizeImage_(url),score:indexedImageScore_(url,p),index:index}})
+    .filter(function(row){
+      const key=imageKey_(row.url);
+      if(!row.url||!key||seen[key]||row.score<0)return false;
+      seen[key]=true;
+      return true;
+    })
+    .sort(function(a,b){return b.score-a.score||a.index-b.index})
+    .slice(0,8)
+    .map(function(row){return row.url});
+}
+function fastImageGallery_(p){
+  const id=String(p&&p.id||'');
+  let images=[];
+
+  const known=KNOWN_BLIBLI_GALLERIES[id]||[];
+  if(known.length)images=images.concat(known);
+
+  // Public image index is the fast path. It avoids the slow Blibli PDP/summary
+  // chain that is frequently blocked by anti-bot verification.
+  if(images.length<2){
+    images=images.concat(indexedImageSearch_(p));
+  }
+
+  if(!images.length){
+    const searchMedia=searchProductMediaData_(id,p&&p.name||'',p&&p.canonicalUrl||p&&p.affiliateUrl||'');
+    images=images.concat(searchMedia.images||[]);
+  }
+
+  if(!images.length){
+    images=images.concat(officialFallbackImages_(id));
+  }
+
+  return rankProductImages_(images,id).slice(0,12);
+}
+function indexedImageSearchBatch_(products){
+  if(typeof UrlFetchApp==='undefined'||!products||!products.length)return {};
+  const rows=[];
+  (products||[]).slice(0,60).forEach(function(p){
+    indexedImageQueries_(p).slice(0,2).forEach(function(q){
+      rows.push({
+        product:p,
+        request:{
+          url:'https://www.bing.com/images/search?q='+encodeURIComponent(q)+'&form=HDRSC2&first=1',
+          method:'get',
+          muteHttpExceptions:true,
+          followRedirects:true,
+          headers:{
+            Accept:'text/html,application/xhtml+xml',
+            'Accept-Language':'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+            'User-Agent':PRODUCT_FETCH_UAS[1]
+          }
+        }
+      });
+    });
+  });
+
+  const result={};
+  if(!rows.length)return result;
+
+  let responses=[];
+  try{
+    responses=UrlFetchApp.fetchAll(rows.map(function(row){return row.request}));
+  }catch(e){return result}
+
+  responses.forEach(function(response,index){
+    const row=rows[index],p=row.product,id=String(p.id||'');
+    if(!id)return;
+    if(!result[id])result[id]=[];
+    try{
+      if(response.getResponseCode()<200||response.getResponseCode()>=400)return;
+      result[id]=result[id].concat(parseIndexedImageUrls_(response.getContentText()||''));
+    }catch(e){}
+  });
+
+  Object.keys(result).forEach(function(id){
+    const p=products.find(function(item){return String(item.id||'')===id})||{};
+    const seen={};
+    result[id]=result[id]
+      .map(function(url,index){return {url:normalizeImage_(url),score:indexedImageScore_(url,p),index:index}})
+      .filter(function(row){
+        const key=imageKey_(row.url);
+        if(!row.url||!key||seen[key]||row.score<0)return false;
+        seen[key]=true;
+        return true;
+      })
+      .sort(function(a,b){return b.score-a.score||a.index-b.index})
+      .slice(0,8)
+      .map(function(row){return row.url});
+  });
+
+  return result;
+}
+function repairMissingImages_(){
+  const products=readProducts_(DRAFT_SHEET);
+  const missing=products.filter(function(p){return !Array.isArray(p.images)||!p.images.length});
+  if(!missing.length)return {ok:true,repaired:0,remaining:0,products:products};
+
+  const batch=indexedImageSearchBatch_(missing);
+  let repaired=0;
+
+  missing.forEach(function(p){
+    let images=(batch[p.id]||[]).slice();
+    if(!images.length)images=fastImageGallery_(p);
+    images=rankProductImages_(images,p.id).slice(0,12);
+    if(!images.length)return;
+
+    const next=Object.assign({},p,{images:images,source:'image-repair'});
+    upsert_(DRAFT_SHEET,next);
+    upsert_(PUBLISHED_SHEET,next);
+    repaired++;
+    log_('IMAGE_REPAIR',p.id,'OK',images.length+' foto');
+  });
+
+  const after=readProducts_(DRAFT_SHEET);
+  const remaining=after.filter(function(p){return !Array.isArray(p.images)||!p.images.length}).length;
+  log_('IMAGE_REPAIR','BATCH','OK',repaired+' repaired · '+remaining+' remaining');
+  return {ok:true,repaired:repaired,remaining:remaining,products:after};
 }
 function officialFallbackImages_(id){
   const page=OFFICIAL_FALLBACK_PAGES[id];

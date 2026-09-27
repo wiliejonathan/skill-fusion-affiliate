@@ -54,6 +54,8 @@ export async function backendFetch(input:string,init:RequestInit={}){
   }else if(url.pathname==="/api/resolve"||url.pathname==="/api/reload-dom"){
     action=url.pathname==="/api/resolve"?"resolve":"reloadDom";
     payload={url:url.searchParams.get("url")};
+  }else if(url.pathname==="/api/repair-images"){
+    action="repairMissingImages";
   }else throw new Error("API tidak dikenal");
 
   try{

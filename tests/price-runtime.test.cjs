@@ -220,3 +220,28 @@ test('search media resolver keeps images only from matching product identity',()
  assert.ok(Array.from(data.images).includes(wanted));
  assert.ok(!Array.from(data.images).includes(other));
 });
+
+
+test('indexed image parser extracts original image URLs and rejects Bing thumbnail URLs',()=>{
+ const ctx=runtime();
+ const html=[
+  '<a class="iusc" m="{&quot;murl&quot;:&quot;https://cdn.example.com/product-main.jpg&quot;,&quot;turl&quot;:&quot;https://tse1.mm.bing.net/th?id=OIP.demo&quot;}"></a>',
+  '<script>var x={"murl":"https:\\/\\/www.static-src.com\\/wcsstore\\/Indraprastha\\/images\\/catalog\\/full\\/catalog-image\\/MTA-999999\\/demo.jpg"}</script>'
+ ].join('');
+ const images=Array.from(ctx.parseIndexedImageUrls_(html));
+ assert.ok(images.includes('https://cdn.example.com/product-main.jpg'));
+ assert.ok(images.includes('https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-999999/demo.jpg'));
+ assert.ok(!images.some(url=>/bing\.net\/th/i.test(url)));
+});
+
+test('fast image resolver prefers public indexed images without calling Blibli media search',()=>{
+ const indexed='https://cdn.example.com/exact-product.jpg';
+ const ctx=runtime();
+ let blibliSearchCalls=0;
+ ctx.indexedImageSearch_=()=>[indexed];
+ ctx.searchProductMediaData_=()=>{blibliSearchCalls++;return {images:[]}};
+ ctx.officialFallbackImages_=()=>[];
+ const data=Array.from(ctx.fastImageGallery_({...product,brand:'ACMIC'}));
+ assert.equal(data[0],indexed);
+ assert.equal(blibliSearchCalls,0);
+});

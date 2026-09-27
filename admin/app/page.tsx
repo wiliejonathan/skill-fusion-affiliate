@@ -509,7 +509,7 @@ export default function AdminPage(){
   const [serverReady,setServerReady]=useState(false);
   const [refreshingUrl,setRefreshingUrl]=useState<string|null>(null);
   const [reloadingUrl,setReloadingUrl]=useState<string|null>(null);
-  const [bulkAction,setBulkAction]=useState<null|"refresh"|"reload">(null);
+  const [bulkAction,setBulkAction]=useState<null|"refresh"|"reload"|"repair">(null);
   const [dirtyUrls,setDirtyUrls]=useState<string[]>([]);
   const [productNotice,setProductNotice]=useState<Record<string,string>>({});
   const [duplicatePopup,setDuplicatePopup]=useState<{title:string;items:string[]}|null>(null);
@@ -1097,6 +1097,45 @@ export default function AdminPage(){
     }
   }
 
+  async function repairMissingImages(){
+    if(bulkAction||refreshingUrl||reloadingUrl) return;
+
+    const missingCount=buildDbProducts(catalog,resolved).filter(product=>!product.images?.length).length;
+    if(!missingCount){
+      setNotice("✓ Semua produk sudah memiliki image.");
+      return;
+    }
+
+    setBulkAction("repair");
+    setNotice(`Repair Missing Images · mencari image untuk ${missingCount} produk tanpa foto...`);
+
+    try{
+      const res=await fetch("/api/repair-images",{method:"POST"});
+      const data=await res.json();
+      if(!res.ok||!data?.ok||!Array.isArray(data.products)){
+        throw new Error(data?.message||"Repair image gagal");
+      }
+
+      const local=dbToLocal(data.products as DbProduct[]);
+      setCatalog(local.catalog);
+      setResolved(local.resolved);
+      setDirtyUrls([]);
+      setServerReady(true);
+
+      const repaired=Number(data.repaired||0);
+      const remaining=Number(data.remaining||0);
+      setNotice(
+        remaining
+          ? `Repair Missing Images selesai · ${repaired} produk berhasil mendapat image, ${remaining} masih belum ditemukan.`
+          : `✓ Repair Missing Images selesai · ${repaired} produk berhasil mendapat image dan langsung tersinkron ke Client.`
+      );
+    }catch(error){
+      setNotice("Repair Missing Images gagal: "+(error instanceof Error?error.message:"coba lagi"));
+    }finally{
+      setBulkAction(null);
+    }
+  }
+
   async function reloadAll(){
     if(bulkAction||refreshingUrl||reloadingUrl) return;
 
@@ -1265,6 +1304,14 @@ export default function AdminPage(){
               {bulkAction==="refresh"?"Refreshing All...":"Refresh Data All"}
             </button>
             <button
+              className="dashboard-action repair-images"
+              onClick={repairMissingImages}
+              disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
+            >
+              <PackageSearch size={16}/>
+              {bulkAction==="repair"?"Repairing Images...":"Repair Missing Images"}
+            </button>
+            <button
               className="dashboard-action reload-all"
               onClick={reloadAll}
               disabled={bulkAction!==null||refreshingUrl!==null||reloadingUrl!==null||busy}
@@ -1286,7 +1333,7 @@ export default function AdminPage(){
       </div>
 
       <section className="panel" id="import">
-        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Import baru dinyatakan selesai setelah image produk berhasil ditemukan dan disimpan. Harga, stok, diskon, dan varian tetap dicek di Blibli.</p></div><CopyCheck size={24}/></div>
+        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Import mencari image otomatis lewat Fast Image Resolver dan baru dinyatakan selesai setelah minimal 1 image tersimpan. Tidak perlu Reload All setelah import.</p></div><CopyCheck size={24}/></div>
 
         <div className="import-mode-bar">
           <button
