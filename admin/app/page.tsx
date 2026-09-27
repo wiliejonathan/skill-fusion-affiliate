@@ -430,6 +430,68 @@ async function resolveBlibliShortlinkFallback(inputUrl:string):Promise<ResolvedP
   return null;
 }
 
+
+async function enrichResolvedImages(data:ResolvedProduct,inputUrl:string):Promise<ResolvedProduct>{
+  const existing=sanitizeProductImages(
+    data.images?.length?data.images:(data.image?[data.image]:[])
+  );
+  if(existing.length){
+    return {...data,image:existing[0]||null,images:existing};
+  }
+
+  const targets=Array.from(new Set([
+    data.canonicalUrl,
+    data.finalUrl,
+    inputUrl
+  ].filter((value):value is string=>typeof value==="string"&&/^https:\/\//i.test(value))));
+
+  const collected:string[]=[];
+  const add=(values:unknown[])=>{
+    for(const raw of values){
+      if(typeof raw!=="string") continue;
+      collected.push(raw.replace(/\\u002F/ig,"/").replace(/\\\//g,"/"));
+    }
+  };
+
+  // Metadata API often exposes the product's og:image even when the full
+  // commerce DOM is protected by Blibli's anti-bot layer.
+  for(const target of targets){
+    try{
+      const endpoint="https://api.microlink.io/?url="+encodeURIComponent(target);
+      const response=await globalThis.fetch(endpoint,{cache:"no-store"});
+      if(!response.ok) continue;
+      const payload=await response.json();
+      const meta=payload?.data||{};
+      add([
+        meta?.image?.url,
+        typeof meta?.image==="string"?meta.image:null
+      ]);
+      const serialized=JSON.stringify(meta).replace(/\\u002F/ig,"/").replace(/\\\//g,"/");
+      add(serialized.match(/https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\s<>]+/ig)||[]);
+      const images=sanitizeProductImages(collected);
+      if(images.length){
+        const title=isUsableProductTitle(meta?.title)?String(meta.title).replace(/\s*[|\-]\s*Blibli.*$/i,"").trim():data.title;
+        return {...data,title,image:images[0],images};
+      }
+    }catch{}
+  }
+
+  // Reader fallback: collect any Blibli catalog images embedded in markdown/text.
+  for(const target of targets){
+    try{
+      const response=await globalThis.fetch("https://r.jina.ai/"+target,{cache:"no-store"});
+      if(!response.ok) continue;
+      const body=await response.text();
+      add(body.match(/https:\/\/(?:www\.)?static-src\.com\/wcsstore\/Indraprastha\/images\/catalog\/[^"'\\s<>\])]+/ig)||[]);
+      add(Array.from(body.matchAll(/!\[[^\]]*\]\((https:\/\/[^)]+)\)/g),match=>match[1]));
+      const images=sanitizeProductImages(collected);
+      if(images.length) return {...data,image:images[0],images};
+    }catch{}
+  }
+
+  return {...data,image:null,images:[]};
+}
+
 export default function AdminPage(){
   const [text,setText]=useState("");
   const [importMode,setImportMode]=useState<ImportMode>("single");
@@ -760,11 +822,12 @@ export default function AdminPage(){
           continue;
         }
 
-        // Known exact galleries are applied immediately, but we still run the
-        // automatic DOM reload below. This also prevents a sparse resolver from
-        // temporarily publishing an empty product.
+        setNotice(`Import ${index+1}/${ready.length} · mencari image produk...`);
+        data=await enrichResolvedImages(data,item.inputUrl);
+
+        // Known exact galleries remain the strongest local fallback.
         const knownImages=KNOWN_BLIBLI_GALLERIES[productId]||[];
-        const resolvedImages=sanitizeBlibliGallery(
+        const resolvedImages=sanitizeProductImages(
           data.images?.length?data.images:(data.image?[data.image]:[])
         );
         if(knownImages.length>resolvedImages.length){
@@ -772,6 +835,12 @@ export default function AdminPage(){
         }else{
           data={...data,image:resolvedImages[0]||data.image||null,images:resolvedImages};
         }
+
+        const finalImages=sanitizeProductImages(data.images?.length?data.images:(data.image?[data.image]:[]));
+        if(!finalImages.length){
+          throw new Error("Image produk belum berhasil ditemukan. Produk tidak disimpan agar Client tidak menerima card tanpa foto.");
+        }
+        data={...data,image:finalImages[0],images:finalImages};
 
         const newItem:CatalogIdentity={
           sequence:nextSequence++,
@@ -798,10 +867,9 @@ export default function AdminPage(){
         let saveData=await saveRes.json();
         if(!saveRes.ok||!saveData?.ok) throw new Error(saveData?.message||"Database sync awal gagal.");
 
-        // Identity + affiliate route are enough to keep a product. Blibli may block
-        // cloud gallery/metadata reads, so an image-less product must NOT be deleted.
-        // savePublish above already writes Draft + Published, which makes the product
-        // immediately available to the Client catalog.
+        // At this point the product has a validated image gallery. savePublish above
+        // writes Draft + Published, so Client receives the product only after image
+        // resolution has completed.
         nextCatalog=candidateCatalog;
         nextResolved=candidateResolved;
         imported++;
@@ -887,7 +955,7 @@ export default function AdminPage(){
     const previousImages=sanitizeProductImages(
       previous?.images?.length ? previous.images : (previous?.image?[previous.image]:[])
     );
-    const domImages=sanitizeBlibliGallery(
+    const domImages=sanitizeProductImages(
       data.images?.length ? data.images : (data.image?[data.image]:[])
     );
     const productId=data.canonicalProductId||previous?.canonicalProductId||item?.canonicalProductId||null;
@@ -975,13 +1043,17 @@ export default function AdminPage(){
         "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now(),
         {cache:"no-store"}
       );
-      const data:ResolvedProduct=await res.json();
+      let data:ResolvedProduct=await res.json();
 
       if(!res.ok||!data?.ok){
         throw new Error(data?.message||"Reload DOM gagal");
       }
 
+      data=await enrichResolvedImages(data,url);
       const next=mergeReloadedProduct(url,data,catalog,resolved);
+      if(!next.merged.images?.length){
+        throw new Error("Image produk belum berhasil ditemukan.");
+      }
       setCatalog(next.catalog);
       setResolved(next.resolved);
 
@@ -1055,10 +1127,12 @@ export default function AdminPage(){
             "/api/reload-dom?url="+encodeURIComponent(source)+"&ts="+Date.now()+"-"+index,
             {cache:"no-store"}
           );
-          const data:ResolvedProduct=await res.json();
+          let data:ResolvedProduct=await res.json();
           if(!res.ok||!data?.ok) throw new Error(data?.message||"Reload DOM gagal");
 
+          data=await enrichResolvedImages(data,url);
           const next=mergeReloadedProduct(url,data,nextCatalog,nextResolved);
+          if(!next.merged.images?.length) throw new Error("Image produk belum berhasil ditemukan.");
           nextCatalog=next.catalog;
           nextResolved=next.resolved;
           reloadedUrls.push(url);
@@ -1212,7 +1286,7 @@ export default function AdminPage(){
       </div>
 
       <section className="panel" id="import">
-        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Produk yang berhasil di-import langsung disimpan ke database bersama. Harga, stok, diskon, dan varian tetap dicek di Blibli.</p></div><CopyCheck size={24}/></div>
+        <div className="panel-title"><div><span className="eyebrow">BLIBLI AFFILIATE</span><h2>Tambah produk dari link affiliate</h2><p>Import baru dinyatakan selesai setelah image produk berhasil ditemukan dan disimpan. Harga, stok, diskon, dan varian tetap dicek di Blibli.</p></div><CopyCheck size={24}/></div>
 
         <div className="import-mode-bar">
           <button
@@ -1292,7 +1366,7 @@ export default function AdminPage(){
                 {meta?.images?.length?<div className="admin-gallery">
                   {meta.images.map((src,j)=><img key={src} src={src} alt={`Foto produk ${j+1}`}/>)}
                 </div>:null}
-                {meta?.images?.length?<small>{meta.images.length} foto katalog tersedia</small>:<small>Foto belum tersedia · produk tetap aktif di Client</small>}
+                {meta?.images?.length?<small>{meta.images.length} foto katalog tersedia</small>:<small>Image belum tersedia · gunakan Reload All untuk mencoba lagi</small>}
                 <div className="admin-meta-data stable-fields">
                   <small><strong>Data tampil:</strong> nama produk · brand · kategori · foto · fitur · Product ID · link affiliate</small>
                   <small><strong>Dicek di Blibli:</strong> harga · diskon · stok · varian · detail penawaran</small>
