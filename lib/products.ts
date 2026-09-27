@@ -1,3 +1,5 @@
+export type ProductVariant={name:string;values:string[]};
+
 export type Product={
   sequence:number;
   id:string;
@@ -14,6 +16,7 @@ export type Product={
   description?:string|null;
   priceUpdatedAt?:string|null;
   pickupPointCode?:string|null;
+  variants?:ProductVariant[];
 };
 
 export const categories=["Semua","Charging & Cable"];
