@@ -185,3 +185,38 @@ test('reader fallback is inert without Apps Script UrlFetchApp',()=>{
  assert.equal(data.price,'');
  assert.deepEqual(Array.from(data.readerDiagnostics),[]);
 });
+
+
+test('SEO and AMP product pages contribute catalog images',()=>{
+ const ctx=runtime();
+ const image='https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-999999/example_full01.jpg';
+ ctx.fetchSeoText_=()=>[
+  '<meta property="product:price:amount" content="15900">',
+  '<meta property="og:image" content="'+image+'">',
+  '<img src="'+image+'">'
+ ].join('');
+ const seo=ctx.seoProductPageData_(product);
+ const amp=ctx.ampProductPageData_(product);
+ assert.equal(seo.price,'15900');
+ assert.ok(Array.from(seo.images).includes(image));
+ assert.ok(Array.from(amp.images).includes(image));
+});
+
+test('search media resolver keeps images only from matching product identity',()=>{
+ const ctx=runtime();
+ const wanted='https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-777777/wanted_full01.jpg';
+ const other='https://www.static-src.com/wcsstore/Indraprastha/images/catalog/full/catalog-image/MTA-888888/other_full01.jpg';
+ ctx.fetchJsonFast_=()=>({
+  data:{
+   products:[
+    {sku:'OTHER-00000-00001',name:'Other',image:other,price:{listed:9000}},
+    {sku:product.id,name:'Cable Exact',image:wanted,price:{listed:15900}}
+   ]
+  }
+ });
+ const data=ctx.searchProductMediaData_(product.id,product.name,product.canonicalUrl);
+ assert.equal(data.title,'Cable Exact');
+ assert.equal(data.price,'15900');
+ assert.ok(Array.from(data.images).includes(wanted));
+ assert.ok(!Array.from(data.images).includes(other));
+});
