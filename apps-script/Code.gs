@@ -43,7 +43,7 @@ function doGet(e){
   try{
     const action=String(p.action||'catalog');
     ensureSchema_();
-    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:7,time:new Date().toISOString()};
+    if(action==='health') out={ok:true,service:'skill-fusion-apps-script',version:8,time:new Date().toISOString()};
     else if(action==='catalog'){
       try{ensurePriceRefreshTrigger_()}catch(triggerError){}
       out={ok:true,products:readProducts_(PUBLISHED_SHEET)};
@@ -476,20 +476,31 @@ function fetchJson_(url,referer){
   return null;
 }
 function fetchJsonFast_(url,referer){
-  const uas=[PRODUCT_FETCH_UAS[0],PRODUCT_FETCH_UAS[1]];
-  for(let i=0;i<uas.length;i++){
+  const attempts=[
+    {'User-Agent':PRODUCT_FETCH_UAS[0]},
+    {
+      Accept:'application/json,text/plain,*/*',
+      'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
+      'Cache-Control':'no-cache',
+      Pragma:'no-cache',
+      Referer:referer||'https://www.blibli.com/',
+      'User-Agent':PRODUCT_FETCH_UAS[1]
+    },
+    {'User-Agent':PRODUCT_FETCH_UAS[2]}
+  ];
+
+  for(let i=0;i<attempts.length;i++){
     try{
-      const r=UrlFetchApp.fetch(url,{muteHttpExceptions:true,followRedirects:true,headers:{
-        Accept:'application/json,text/plain,*/*',
-        'Accept-Language':'id-ID,id;q=0.9,en;q=0.8',
-        'Cache-Control':'no-cache',
-        Pragma:'no-cache',
-        Referer:referer||'https://www.blibli.com/',
-        'User-Agent':uas[i]
-      }});
+      const r=UrlFetchApp.fetch(url,{
+        muteHttpExceptions:true,
+        followRedirects:true,
+        headers:attempts[i]
+      });
       if(r.getResponseCode()<200||r.getResponseCode()>=300)continue;
       const body=r.getContentText();
-      if(body)return JSON.parse(body);
+      if(!body)continue;
+      const parsed=JSON.parse(body);
+      if(parsed)return parsed;
     }catch(e){}
   }
   return null;
@@ -553,14 +564,11 @@ function selectedVariantPagePrice_(p){
 }
 function fastSummaryPrice_(p){
   const id=String(p&&p.id||'').trim();
-  if(!id)return {price:'',currency:'',pickupPointCode:p&&p.pickupPointCode||''};
+  if(!id)return {price:'',currency:'',pickupPointCode:p&&p.pickupPointCode||'',description:'',variants:[]};
 
   const referer=String(p.canonicalUrl||p.affiliateUrl||'https://www.blibli.com/');
   let pickupPointCode=String(p.pickupPointCode||'').trim();
 
-  // Blibli's price object is location-aware. Existing products imported before
-  // this field was stored can recover the pickup point once from the affiliate
-  // redirect, then persist it for all later lookups.
   if(!pickupPointCode&&p.affiliateUrl){
     try{
       const resolved=resolveUrl_(validBlibliUrl_(p.affiliateUrl));
@@ -586,17 +594,31 @@ function fastSummaryPrice_(p){
     endpoints.push(url);
   }
 
+  let best={price:'',currency:'',pickupPointCode:pickupPointCode,description:'',variants:[]};
+
   for(let i=0;i<endpoints.length;i++){
     const payload=fetchJsonFast_(endpoints[i],referer);
     if(!payload)continue;
     const data=payload.data||payload;
+
     let priceData=extractSummaryPrice_(data);
     if(!priceData.price)priceData=extractSerializedPrice_(JSON.stringify(data));
+
+    const description=extractSummaryDescription_(data);
+    const variants=extractSummaryVariants_(data);
+
+    if(description.length>best.description.length)best.description=description;
+    if(variants.length>best.variants.length)best.variants=variants;
+
     const price=normalizePrice_(priceData.price);
-    if(price)return {price:price,currency:priceData.currency||'IDR',pickupPointCode:pickupPointCode};
+    if(price){
+      best.price=price;
+      best.currency=priceData.currency||'IDR';
+      // Keep looping once to collect richer product-level attributes/options.
+    }
   }
 
-  return {price:'',currency:'',pickupPointCode:pickupPointCode};
+  return best;
 }
 function summaryData_(canonical,id,contextUrl){
   let pickupPointCode='';
@@ -676,13 +698,15 @@ function cleanDescription_(value){
 function extractSummaryDescription_(value){
   const candidates=[];
   const scores={
-    productdescription:130,
-    description:120,
-    shortdescription:115,
-    longdescription:115,
-    productdetail:105,
-    productdetails:105,
-    overview:100,
+    uniquesellingpoint:170,
+    productstory:165,
+    productdescription:160,
+    description:150,
+    shortdescription:145,
+    longdescription:145,
+    productdetail:135,
+    productdetails:135,
+    overview:120,
     summary:90
   };
 
@@ -753,42 +777,73 @@ function normalizeVariants_(value){
 }
 function extractSummaryVariants_(value){
   const groups=[];
+  const byName={};
 
-  function maybeGroup(node,keyHint){
-    if(!node||typeof node!=='object')return;
+  function add(name,rawValue){
+    const label=String(name||'Varian').replace(/\s+/g,' ').trim();
+    const val=String(rawValue||'').replace(/\s+/g,' ').trim();
+    if(!label||!val||val.length>100)return;
+    const key=label.toLowerCase();
+    if(!byName[key]){
+      byName[key]={name:label,values:[]};
+      groups.push(byName[key]);
+    }
+    if(byName[key].values.indexOf(val)<0)byName[key].values.push(val);
+  }
 
-    const label=String(
-      node.name||node.label||node.title||node.attributeName||node.variantName||keyHint||''
-    ).trim();
+  function consumeAttribute(attr){
+    if(!attr||typeof attr!=='object')return;
+    const name=attr.name||attr.label||attr.attributeName||attr.variantName||'Varian';
 
-    const likely=/variant|variation|attribute|option|color|colour|warna|size|ukuran|kapasitas|storage|memory|ram/i.test(label+' '+String(keyHint||''));
-    if(!likely)return;
+    if(attr.value!==undefined&&attr.value!==null&&typeof attr.value!=='object'){
+      add(name,attr.value);
+    }
 
-    const raw=node.values||node.options||node.items||node.children||node.variants||node.variantValues;
-    if(Array.isArray(raw)){
-      const values=raw.map(function(v){
-        if(typeof v==='string'||typeof v==='number')return String(v);
-        if(v&&typeof v==='object')return String(v.name||v.label||v.value||v.text||v.displayName||'');
-        return '';
-      }).filter(Boolean);
-      if(values.length)groups.push({name:label||'Varian',values:values});
+    const values=attr.values||attr.variantValues||attr.items;
+    if(Array.isArray(values)){
+      values.forEach(function(item){
+        if(item===null||item===undefined)return;
+        if(typeof item==='string'||typeof item==='number')add(name,item);
+        else if(typeof item==='object')add(name,item.value||item.name||item.label||item.text||item.displayName||'');
+      });
     }
   }
 
   function visit(node,keyHint){
     if(!node)return;
+
     if(Array.isArray(node)){
+      if(/attributes?/i.test(String(keyHint||''))){
+        node.forEach(consumeAttribute);
+      }
       node.forEach(function(item){visit(item,keyHint)});
       return;
     }
+
     if(typeof node!=='object')return;
 
-    maybeGroup(node,keyHint);
+    // Direct Blibli attribute object: {name:"Warna", value:"Black"}.
+    if((node.name||node.attributeName)&&(node.value!==undefined||Array.isArray(node.values))){
+      consumeAttribute(node);
+    }
+
+    // Direct Blibli option: {attributes:[{name,value}], ...}.
+    if(Array.isArray(node.attributes)){
+      node.attributes.forEach(consumeAttribute);
+    }
+
     Object.keys(node).forEach(function(key){
       const child=node[key];
 
-      if(/^(color|colour|warna|size|ukuran)$/i.test(key)&&Array.isArray(child)){
-        groups.push({name:/warna|color|colour/i.test(key)?'Warna':key,values:child});
+      if(/^(color|colour|warna|size|ukuran|capacity|kapasitas|storage|memory|ram)$/i.test(key)){
+        if(Array.isArray(child)){
+          child.forEach(function(item){
+            if(typeof item==='string'||typeof item==='number')add(key,item);
+            else if(item&&typeof item==='object')add(key,item.value||item.name||item.label||'');
+          });
+        }else if(typeof child==='string'||typeof child==='number'){
+          add(key,child);
+        }
       }
 
       if(child&&typeof child==='object')visit(child,key);
@@ -817,8 +872,10 @@ function extractSeoDescription_(html,title){
   const value=decodeHtml_(html||'');
 
   const serialized=pick_(value,[
-    /"description"\s*:\s*"((?:\\.|[^"\\]){30,5000})"/i,
-    /"productDescription"\s*:\s*"((?:\\.|[^"\\]){30,5000})"/i
+    /"uniqueSellingPoint"\s*:\s*"((?:\\.|[^"\\]){20,5000})"/i,
+    /"productStory"\s*:\s*"((?:\\.|[^"\\]){20,5000})"/i,
+    /"productDescription"\s*:\s*"((?:\\.|[^"\\]){20,5000})"/i,
+    /"description"\s*:\s*"((?:\\.|[^"\\]){20,5000})"/i
   ]);
   const serializedClean=cleanDescription_(serialized);
   if(serializedClean&&!/online mall|belanja online/i.test(serializedClean))return serializedClean;
@@ -876,7 +933,44 @@ function extractSeoVariants_(html){
     groups.push({name:def.name,values:values});
   });
 
+  // Embedded Blibli state often contains option attributes even when buttons are
+  // not rendered into the SEO HTML. Read those name/value pairs as a fallback.
+  const serialized=decodeHtml_(html||'');
+  const pairRe=/"name"\s*:\s*"(Warna|Color|Colour|Ukuran|Size|Kapasitas|Storage|Memory|RAM)"[\s\S]{0,260}?"value"\s*:\s*"([^"]{1,100})"/ig;
+  let match;
+  while((match=pairRe.exec(serialized))){
+    groups.push({name:match[1],values:[match[2]]});
+  }
+
   return normalizeVariants_(groups);
+}
+function ampProductPageData_(p){
+  let page=String(p&&p.canonicalUrl||'');
+  if(!page)return {price:'',currency:'',description:'',variants:[]};
+
+  try{
+    const u=new URL(page);
+    if(!/\/p\//i.test(u.pathname))return {price:'',currency:'',description:'',variants:[]};
+    if(!/^\/amp\//i.test(u.pathname))u.pathname='/amp'+u.pathname;
+    u.search='';
+    if(p.pickupPointCode)u.searchParams.set('pickupPointCode',String(p.pickupPointCode));
+    page=u.toString();
+  }catch(e){
+    return {price:'',currency:'',description:'',variants:[]};
+  }
+
+  const html=fetchText_(page);
+  if(!html)return {price:'',currency:'',description:'',variants:[]};
+
+  return {
+    price:extractHtmlPrice_(html),
+    currency:pick_(html,[
+      /<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([^"']+)["']/i,
+      /"priceCurrency"\s*:\s*"([^"]+)"/i
+    ])||'IDR',
+    description:extractSeoDescription_(html,p.name||''),
+    variants:extractSeoVariants_(html)
+  };
 }
 function seoProductPageData_(p){
   const id=String(p&&p.id||'').trim();
@@ -1080,13 +1174,24 @@ function refreshPriceForProduct_(p){
   if(recoveredPickupPointCode&&!p.pickupPointCode)p=Object.assign({},p,{pickupPointCode:recoveredPickupPointCode});
 
   let priceSource=priceData.price?'summary':'';
+  let bestDescription=cleanDescription_(priceData.description||p.description||'');
+  let bestVariants=normalizeVariants_((priceData.variants&&priceData.variants.length?priceData.variants:p.variants)||[]);
 
-  // The SEO/product-level page is the strongest fallback for Apps Script:
-  // Googlebot markup carries the visible sell price plus description/variants.
   const seoData=seoProductPageData_(p);
+  if(seoData.description&&seoData.description.length>bestDescription.length)bestDescription=cleanDescription_(seoData.description);
+  if(seoData.variants&&seoData.variants.length>bestVariants.length)bestVariants=normalizeVariants_(seoData.variants);
+
   if(!priceData.price&&seoData.price){
     priceData={price:seoData.price,currency:seoData.currency||'IDR'};
     priceSource='seo-page';
+  }
+
+  const ampData=ampProductPageData_(p);
+  if(ampData.description&&ampData.description.length>bestDescription.length)bestDescription=cleanDescription_(ampData.description);
+  if(ampData.variants&&ampData.variants.length>bestVariants.length)bestVariants=normalizeVariants_(ampData.variants);
+  if(!priceData.price&&ampData.price){
+    priceData={price:ampData.price,currency:ampData.currency||'IDR'};
+    priceSource='amp-page';
   }
 
   // Blibli's selected-variant page remains a second fallback.
@@ -1112,8 +1217,8 @@ function refreshPriceForProduct_(p){
   }
 
   const price=normalizePrice_(priceData.price);
-  const description=cleanDescription_(seoData.description||p.description||'');
-  const variants=normalizeVariants_((seoData.variants&&seoData.variants.length?seoData.variants:p.variants)||[]);
+  const description=bestDescription;
+  const variants=bestVariants;
 
   if(!price){
     return Object.assign({},p,{
@@ -1177,7 +1282,7 @@ function publicPrice_(id){
       // A blocked/empty Blibli response should be retriable on the next visitor,
       // not frozen for minutes.
       cache.remove(throttleKey);
-      log_('PRICE_LOOKUP',id,'EMPTY','pickup='+(fresh.pickupPointCode||'-')+' · summary/variant/search/PDP tidak mengembalikan harga');
+      log_('PRICE_LOOKUP',id,'EMPTY','pickup='+(fresh.pickupPointCode||'-')+' · desc='+(fresh.description?'yes':'no')+' · variants='+((fresh.variants||[]).length)+' · semua sumber harga kosong');
     }
     return {ok:true,id:id,price:fresh.price||cached.price||null,currency:fresh.currency||cached.currency||null,description:fresh.description||cached.description||null,variants:Array.isArray(fresh.variants)?fresh.variants:(cached.variants||[]),priceUpdatedAt:fresh.priceUpdatedAt||cached.priceUpdatedAt||null,refreshed:!!fresh.priceUpdatedAt&&fresh.priceUpdatedAt!==cached.priceUpdatedAt};
   }finally{
