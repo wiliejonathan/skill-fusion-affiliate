@@ -57,8 +57,14 @@ export function inferProductCategory(product:Pick<Product,"name"|"category"|"fea
   if(/\b(smartband|smart\s*band|galaxy\s+fit|huawei\s+band)\b/i.test(text)) return "Smartband";
   if(/\b(smartwatch|smart\s*watch|watch\s+fit|watch\s+gt|redmi\s+watch|gt\s+watch|forerunner)\b/i.test(text)) return "Smartwatch";
 
-  if(/\b(baterai|battery|batre|batrai|batrei)\b/i.test(text)) return "Baterai HP";
   if(/\b(nokia\s+(?:105|110|150)|feature\s*phone|handphone\s+jadul)\b/i.test(text)) return "Feature Phone";
+
+  // Storage capacity in GB identifies a device, not a replacement battery.
+  // More specific device families above (Tablet/TWS/Smartwatch/Smartband) win first.
+  const hasGbToken=/\b\d+(?:\.\d+)?\s*gb\b/i.test(text);
+  if(hasGbToken) return "Smartphone";
+
+  if(/\b(baterai|battery|batre|batrai|batrei)\b/i.test(text)) return "Baterai HP";
 
   const smartphoneModel=
     /\b(smartphone|hp\s+oppo|galaxy\s+(?:a|s)\d{1,2}\b|poco\s+[xc]\d|redmi\s+a\d|realme\s+(?:c|note|p)\d|oppo\s+a\d|huawei\s+pura\s+\d|pura\s+\d{2}|villaon\s+v\d)\b/i.test(text)
