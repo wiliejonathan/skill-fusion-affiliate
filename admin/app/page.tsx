@@ -1,6 +1,6 @@
 "use client";
 
-import {backendFetch as fetch,clearAdminKey,getStoredAdminKey,verifyAdminKey} from "@/lib/backend";
+import {backendFetch as fetch,clearAdminKey,getAdminAppsScriptUrl,getStoredAdminKey,setAdminAppsScriptUrl,verifyAdminKey} from "@/lib/backend";
 import {useEffect,useMemo,useState} from "react";
 import {CheckCircle2,ClipboardPaste,CopyCheck,ExternalLink,Eye,EyeOff,LayoutDashboard,Link2,List,PackageSearch,RefreshCw,ShieldCheck,Trash2} from "lucide-react";
 import {parseBlibliImportUrl,type ImportCandidate} from "@/lib/importer";
@@ -554,6 +554,9 @@ export default function AdminPage(){
   const [rememberLogin,setRememberLogin]=useState(true);
   const [loginBusy,setLoginBusy]=useState(false);
   const [loginError,setLoginError]=useState("");
+  const [backendUrl,setBackendUrl]=useState(()=>getAdminAppsScriptUrl());
+  const [showBackendSettings,setShowBackendSettings]=useState(false);
+  const [backendStatus,setBackendStatus]=useState("");
   const [catalog,setCatalog]=useState<CatalogIdentity[]>(initialCatalog);
   const [resolved,setResolved]=useState<Record<string,ResolvedProduct>>(initialResolved);
   const [busy,setBusy]=useState(false);
@@ -588,6 +591,7 @@ export default function AdminPage(){
     }
     setLoginBusy(true);
     setLoginError("");
+    setBackendStatus("");
     try{
       const health=await fetch("/api/health-check",{cache:"no-store"} as RequestInit).then(res=>res.json());
       if(!health?.ok) throw new Error(health?.message||"Apps Script tidak dapat dijangkau.");
@@ -596,13 +600,48 @@ export default function AdminPage(){
       await applyServerProducts(data.products as DbProduct[]);
       setAuthenticated(true);
       setLoginPassword("");
+      setShowBackendSettings(false);
     }catch(error){
+      const message=error instanceof Error?error.message:"Password Admin salah.";
+      const code=String((error as {code?:string}|null)?.code||"");
       setAuthenticated(false);
-      setLoginError(error instanceof Error?error.message:"Password Admin salah.");
+      setLoginError(message);
+      if(
+        code.startsWith("APPS_SCRIPT_")||
+        /Apps Script|Web App|deployment|\/exec/i.test(message)
+      ){
+        setShowBackendSettings(true);
+      }
     }finally{
       setLoginBusy(false);
       setAuthReady(true);
     }
+  }
+
+  async function saveBackendAndRetry(){
+    const url=backendUrl.trim();
+    if(!url){
+      setLoginError("Masukkan URL Web App Apps Script /exec.");
+      return;
+    }
+
+    setLoginBusy(true);
+    setLoginError("");
+    setBackendStatus("");
+    try{
+      const saved=setAdminAppsScriptUrl(url);
+      setBackendUrl(saved);
+      const health=await fetch("/api/health-check",{cache:"no-store"} as RequestInit).then(res=>res.json());
+      if(!health?.ok) throw new Error(health?.message||"Apps Script tidak dapat dijangkau.");
+      setBackendStatus(`Terhubung${health.version?` · backend v${health.version}`:""}`);
+    }catch(error){
+      setLoginError(error instanceof Error?error.message:"URL Apps Script tidak dapat digunakan.");
+      setLoginBusy(false);
+      return;
+    }
+
+    setLoginBusy(false);
+    if(loginPassword.trim()) await loginAdmin(loginPassword,rememberLogin);
   }
 
   function logoutAdmin(){
@@ -611,6 +650,7 @@ export default function AdminPage(){
     setServerReady(false);
     setLoginPassword("");
     setLoginError("");
+    setBackendStatus("");
   }
 
   async function pushDatabase(nextCatalog:CatalogIdentity[],nextResolved:Record<string,ResolvedProduct>){
@@ -1353,6 +1393,42 @@ export default function AdminPage(){
             <span><strong>Remember me</strong><small>Simpan login di perangkat ini sampai Anda logout.</small></span>
           </label>
           {loginError&&<div className="admin-login-error">{loginError}</div>}
+          {(showBackendSettings||loginError)&&<div className="admin-backend-recovery">
+            <div className="admin-backend-recovery-head">
+              <div>
+                <strong>Koneksi Apps Script</strong>
+                <small>Jika deployment diganti, tempel URL Web App /exec terbaru di sini.</small>
+              </div>
+              <button type="button" onClick={()=>setShowBackendSettings(value=>!value)}>
+                {showBackendSettings?"Tutup":"Atur URL"}
+              </button>
+            </div>
+            {showBackendSettings&&<>
+              <label className="admin-login-label" htmlFor="admin-backend-url">Web App URL</label>
+              <input
+                id="admin-backend-url"
+                className="admin-backend-url"
+                type="url"
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                value={backendUrl}
+                onChange={e=>setBackendUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                disabled={loginBusy}
+              />
+              <button
+                className="admin-backend-save"
+                type="button"
+                onClick={()=>void saveBackendAndRetry()}
+                disabled={loginBusy||!backendUrl.trim()}
+              >
+                {loginBusy?"Menguji koneksi...":"Simpan URL & Coba Lagi"}
+              </button>
+              {backendStatus&&<div className="admin-backend-status">{backendStatus}</div>}
+            </>}
+          </div>}
           <button className="admin-login-button" type="submit" disabled={loginBusy||!loginPassword.trim()}>
             {loginBusy?"Memeriksa...":"Masuk ke Admin"}
           </button>
